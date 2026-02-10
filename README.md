@@ -9,4 +9,4 @@ Run: ```wasm-pack build --target web --release```
 Push the files and the /pkg folder to your repo.
 
 
-### Please note that this will now work, because it is pure AI slop
+### Please note that this will not work, because it is pure AI slop
