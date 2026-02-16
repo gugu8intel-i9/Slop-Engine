@@ -23,5 +23,6 @@ To build and contribute to Slop Engine, you need the following:
 1. **Rust Toolchain**: [Install Rust](https://rustup.rs/)
 2. **wasm-pack**:
    ```bash cargo install wasm-pack```
+   If you wish to contribute, please be a sponsor, because these API calls are getting expensive
 
-### Please note that this will not work, because it is pure AI slop
+* Please note that this will not work, because it is pure AI slop
