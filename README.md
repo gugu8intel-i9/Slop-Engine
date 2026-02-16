@@ -25,5 +25,7 @@ To build and contribute to Slop Engine, you need the following:
    ```bash cargo install wasm-pack```
    
    * If you wish to contribute, please be a sponsor, because these API calls are getting expensive
-
-* Please note that this will not work, because it is pure AI slop
+   
+   * If any issue occurs, please put an issue out
+   
+   * Please note that this will not work, because it is pure AI slop
