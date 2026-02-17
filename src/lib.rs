@@ -1,10 +1,17 @@
 // src/lib.rs
-// Final fixed, drop-in lib.rs compatible with:
-// - wgpu 22.x
-// - winit 0.29.x
-// - wasm-bindgen (wasm target)
-// This file uses the correct winit event-loop signature, handles ScaleFactorChanged
-// without assuming a size field, and matches wgpu 22 API expectations.
+// Fully fixed, drop-in lib.rs compatible with:
+// - wgpu = "22.x"
+// - winit = "0.29.x"
+// - wasm-bindgen for wasm target
+//
+// Fixes applied:
+// - Unwrap EventLoop::new() result so build(&event_loop) and run() use the correct types.
+// - Use wgpu::Gles3MinorVersion::Automatic for gles_minor_version.
+// - Set desired_maximum_frame_latency as a u32 (2).
+// - Handle ScaleFactorChanged with `..` to ignore extra fields.
+// - Use MainEventsCleared to request redraws (winit 0.29).
+//
+// Replace your existing src/lib.rs with this file.
 
 #![allow(dead_code)]
 #![allow(unused_imports)]
@@ -31,9 +38,9 @@ pub async fn run() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-#[allow(dead_code)]
-pub async fn run() {
-    run_inner().await;
+pub fn run_native() {
+    // Block on the async runtime to run the same initialization path as wasm.
+    pollster::block_on(run_inner());
 }
 
 async fn run_inner() {
@@ -42,7 +49,8 @@ async fn run_inner() {
     let _ = console_log::init_with_level(log::Level::Debug);
 
     // Create event loop + window
-    let event_loop = EventLoop::new();
+    // On some platforms EventLoop::new() returns Result; unwrap to get EventLoop.
+    let event_loop = EventLoop::new().expect("Failed to create event loop");
     let window = WindowBuilder::new()
         .with_title("Slop Engine")
         .build(&event_loop)
@@ -70,9 +78,9 @@ async fn run_inner() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
         dx12_shader_compiler: Default::default(),
-        // Some wgpu builds expect these fields; include them for compatibility.
+        // Provide fields for compatibility across builds
         flags: wgpu::InstanceFlags::empty(),
-        gles_minor_version: 0,
+        gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
     });
 
     let surface = unsafe { instance.create_surface(&window) }
@@ -121,13 +129,13 @@ async fn run_inner() {
         present_mode: caps.present_modes[0],
         alpha_mode: caps.alpha_modes[0],
         view_formats: vec![],
-        desired_maximum_frame_latency: None,
+        // desired_maximum_frame_latency expects u32 in this wgpu version
+        desired_maximum_frame_latency: 2u32,
     };
 
     surface.configure(&device, &config);
 
     // === Main event loop (winit 0.29 correct signature) ===
-    // Note: run consumes the event loop and typically never returns.
     event_loop.run(move |event, _event_loop_target, control_flow| {
         // Default to polling; change to Wait if you prefer lower CPU usage.
         *control_flow = ControlFlow::Poll;
@@ -162,7 +170,7 @@ async fn run_inner() {
                 }
             }
 
-            // MainEventsCleared is the usual place to request a redraw.
+            // Request redraw each frame
             Event::MainEventsCleared => {
                 window.request_redraw();
             }
