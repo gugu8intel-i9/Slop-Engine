@@ -27,3 +27,12 @@ image = "0.24"
 bytemuck = "1.13"
 anyhow = "1.0"
 pollster = "0.3" # optional for sync examples
+
+[dependencies]
+wgpu = "0.15"
+bytemuck = "1.13"
+parking_lot = "0.12"
+lru = "0.8"
+xxhash-rust = "1.2"
+image = { version = "0.24", optional = true }
+anyhow = "1.0"
