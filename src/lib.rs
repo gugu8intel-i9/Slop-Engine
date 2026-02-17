@@ -1,17 +1,16 @@
 // src/lib.rs
-// Fully fixed, drop-in lib.rs compatible with:
+// Final fixed, drop-in lib.rs compatible with:
 // - wgpu = "22.x"
 // - winit = "0.29.x"
 // - wasm-bindgen for wasm target
 //
-// Fixes applied:
-// - Unwrap EventLoop::new() result so build(&event_loop) and run() use the correct types.
+// Key fixes in this version:
+// - Unwrap EventLoop::new() so build(&event_loop) and run() use correct types.
 // - Use wgpu::Gles3MinorVersion::Automatic for gles_minor_version.
-// - Set desired_maximum_frame_latency as a u32 (2).
-// - Handle ScaleFactorChanged with `..` to ignore extra fields.
-// - Use MainEventsCleared to request redraws (winit 0.29).
-//
-// Replace your existing src/lib.rs with this file.
+// - Set desired_maximum_frame_latency as a u32.
+// - Use the correct EventLoop::run closure signature (two args).
+// - Use Event::RedrawRequested for rendering and request an initial redraw before run.
+// - Use target.set_control_flow(...) and target.exit() to control the loop.
 
 #![allow(dead_code)]
 #![allow(unused_imports)]
@@ -135,16 +134,20 @@ async fn run_inner() {
 
     surface.configure(&device, &config);
 
+    // Request an initial redraw so we get a RedrawRequested event after run starts.
+    window.request_redraw();
+
     // === Main event loop (winit 0.29 correct signature) ===
-    event_loop.run(move |event, _event_loop_target, control_flow| {
+    event_loop.run(move |event, target| {
         // Default to polling; change to Wait if you prefer lower CPU usage.
-        *control_flow = ControlFlow::Poll;
+        target.set_control_flow(ControlFlow::Poll);
 
         match event {
             Event::WindowEvent { event, window_id } if window_id == window.id() => {
                 match event {
                     WindowEvent::CloseRequested => {
-                        *control_flow = ControlFlow::Exit;
+                        // Use the EventLoopWindowTarget to exit cleanly.
+                        target.exit();
                     }
 
                     WindowEvent::Resized(new_size) => {
@@ -170,10 +173,8 @@ async fn run_inner() {
                 }
             }
 
-            // Request redraw each frame
-            Event::MainEventsCleared => {
-                window.request_redraw();
-            }
+            // We rely on the initial window.request_redraw() and RedrawRequested events.
+            // No MainEventsCleared handling here to avoid API mismatches across winit versions.
 
             _ => {}
         }
