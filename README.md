@@ -24,7 +24,7 @@ To build and contribute to Slop Engine, you need the following:
 2. **wasm-pack**:
    ```bash cargo install wasm-pack```
    
-   * If you wish to contribute, please be a sponsor, because these API calls are getting expensive
+   * If you wish to contribute, please be a sponsor, because these API costs are getting expensive
    
    * If any issue occurs, please put an issue out
    
