@@ -17,7 +17,7 @@ bytemuck = "1.13"
 parking_lot = "0.12"
 anyhow = "1.0"
 lru = "0.8"
-xxhash-rust = "1.2"
+xxhash-rust = "0.8.15"
 
 # WASM support
 wasm-bindgen = "0.2"
