@@ -28,32 +28,32 @@ pub async fn run() {
     {
         use winit::platform::web::WindowExtWebSys;
 
-        web_sys::window()
-            .and_then(|win| win.document())
-            .and_then(|doc| {
-                let dst = doc.get_element_by_id("slop-container")?;
-                let canvas = web_sys::Element::from(window.canvas().unwrap());
-                dst.append_child(&canvas).ok()?;
-                Some(())
-            })
-            .expect("Failed to attach canvas to HTML");
+        let canvas = window.canvas().expect("No canvas found");
+        let canvas_el: web_sys::Element = canvas.into();
+
+        let document = web_sys::window()
+            .and_then(|w| w.document())
+            .expect("No document");
+
+        if let Some(dst) = document.get_element_by_id("slop-container") {
+            dst.append_child(&canvas_el).unwrap();
+        } else {
+            document.body().unwrap().append_child(&canvas_el).unwrap();
+        }
     }
 
     // === WGPU SETUP (wgpu 22) ===
 
-    // Instance
-    let backends = wgpu::Backends::all();
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends,
+        backends: wgpu::Backends::all(),
         flags: wgpu::InstanceFlags::default(),
         dx12_shader_compiler: Default::default(),
         gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
     });
 
-    // Surface
-    let surface = unsafe { instance.create_surface(&window) }.expect("Failed to create surface");
+    let surface = unsafe { instance.create_surface(&window) }
+        .expect("Failed to create surface");
 
-    // Adapter
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -61,9 +61,8 @@ pub async fn run() {
             force_fallback_adapter: false,
         })
         .await
-        .expect("Failed to find a suitable GPU adapter");
+        .expect("No suitable GPU adapters found");
 
-    // Device + queue
     let (device, queue) = adapter
         .request_device(
             &wgpu::DeviceDescriptor {
@@ -82,32 +81,31 @@ pub async fn run() {
 
     // Surface config
     let size = window.inner_size();
-    let surface_caps = surface.get_capabilities(&adapter);
-    let surface_format = surface_caps
+    let caps = surface.get_capabilities(&adapter);
+    let format = caps
         .formats
         .iter()
         .copied()
         .find(|f| f.is_srgb())
-        .unwrap_or(surface_caps.formats[0]);
+        .unwrap_or(caps.formats[0]);
 
     let mut config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        format: surface_format,
+        format,
         width: size.width.max(1),
         height: size.height.max(1),
-        present_mode: surface_caps.present_modes[0],
-        alpha_mode: surface_caps.alpha_modes[0],
+        present_mode: caps.present_modes[0],
+        alpha_mode: caps.alpha_modes[0],
         view_formats: vec![],
         desired_maximum_frame_latency: 2,
     };
 
     surface.configure(&device, &config);
 
-    // === MAIN EVENT LOOP (winit 0.29 API) ===
+    // === MAIN EVENT LOOP (correct winit 0.29 API) ===
 
     event_loop
         .run(move |event, target| {
-            // Always poll; you can change to Wait if you want
             target.set_control_flow(ControlFlow::Poll);
 
             match event {
@@ -116,6 +114,7 @@ pub async fn run() {
                         WindowEvent::CloseRequested => {
                             target.exit();
                         }
+
                         WindowEvent::Resized(new_size) => {
                             if new_size.width > 0 && new_size.height > 0 {
                                 config.width = new_size.width;
@@ -123,23 +122,20 @@ pub async fn run() {
                                 surface.configure(&device, &config);
                             }
                         }
-                        WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                            let new_size = *new_inner_size;
-                            if new_size.width > 0 && new_size.height > 0 {
-                                config.width = new_size.width;
-                                config.height = new_size.height;
-                                surface.configure(&device, &config);
-                            }
+
+                        WindowEvent::ScaleFactorChanged { scale_factor } => {
+                            // No resizing here — winit will send Resized next.
+                            log::debug!("Scale factor changed: {}", scale_factor);
                         }
+
                         WindowEvent::RedrawRequested => {
-                            // Render a simple clear frame
                             render_frame(&surface, &device, &queue, &config);
                         }
+
                         _ => {}
                     }
                 }
 
-                // AboutToWait is the new "MainEventsCleared" style hook
                 Event::AboutToWait => {
                     window.request_redraw();
                 }
@@ -157,23 +153,20 @@ fn render_frame(
     config: &wgpu::SurfaceConfiguration,
 ) {
     let frame = match surface.get_current_texture() {
-        Ok(frame) => frame,
-        Err(err) => {
-            log::warn!("Surface error: {err:?}, reconfiguring");
+        Ok(f) => f,
+        Err(_) => {
             surface.configure(device, config);
             match surface.get_current_texture() {
-                Ok(frame) => frame,
-                Err(err) => {
-                    log::error!("Failed to acquire frame after reconfigure: {err:?}");
+                Ok(f) => f,
+                Err(e) => {
+                    log::error!("Surface error: {:?}", e);
                     return;
                 }
             }
         }
     };
 
-    let view = frame
-        .texture
-        .create_view(&wgpu::TextureViewDescriptor::default());
+    let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("SlopEngine Encoder"),
@@ -199,9 +192,8 @@ fn render_frame(
             occlusion_query_set: None,
             timestamp_writes: None,
         });
-        // No draw calls yet; this just clears the screen.
     }
 
-    queue.submit(std::iter::once(encoder.finish()));
+    queue.submit(Some(encoder.finish()));
     frame.present();
 }
