@@ -18,3 +18,12 @@ console_error_panic_hook = "0.1"
 console_log = "1.0"
 log = "0.4"
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "Gpu"] }
+
+# GLTF Loader
+
+gltf = "0.17"
+gltf-json = "0.17"
+image = "0.24"
+bytemuck = "1.13"
+anyhow = "1.0"
+pollster = "0.3" # optional for sync examples
