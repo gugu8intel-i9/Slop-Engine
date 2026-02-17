@@ -179,7 +179,7 @@ Just open any `.wgsl` file — the engine will hot‑reload it instantly.
 ---
 
 ## **📜 License**
-MIT or your preferred license.
+GNU Affero General Public License
 
 ---
 
@@ -206,4 +206,4 @@ If you want, I can also generate:
    
    * If any issue occurs, please put an issue out
    
-   * Please note that this will not work, because it is pure AI slop
+   ### Please note that this will not work, because it is pure AI slop
