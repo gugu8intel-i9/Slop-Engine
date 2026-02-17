@@ -36,3 +36,9 @@ lru = "0.8"
 xxhash-rust = "1.2"
 image = { version = "0.24", optional = true }
 anyhow = "1.0"
+
+[dependencies]
+notify = "6.1"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+anyhow = "1.0"
