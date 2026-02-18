@@ -195,12 +195,6 @@ Contributions are welcome — especially around:
 ## **💬 Final Notes**
 Slop Engine is built for developers who want **full control**, **maximum performance**, and **modern rendering techniques** without the bloat of traditional engines. Every subsystem is handcrafted for clarity, speed, and extensibility.
 
-If you want, I can also generate:
-- A **logo**
-- A **website landing page**
-- A **full documentation wiki**
-- A **sample project** using all engine features
-
    
    * If you wish to contribute, please be a sponsor, because these API costs are getting expensive
    
