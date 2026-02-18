@@ -193,7 +193,7 @@ Contributions are welcome — especially around:
 ---
 
 ## **💬 Final Notes**
-Slop Engine is built for developers who want **full control**, **maximum performance**, and **modern rendering techniques** without the bloat of traditional engines. Every subsystem is handcrafted for clarity, speed, and extensibility.
+Slop Engine is built for developers who want **full control**, **maximum performance**, and **modern rendering techniques** without the bloat of traditional engines. Every subsystem is slopped for clarity, speed, and extensibility.
 
    
    * If you wish to contribute, please be a sponsor, because these API costs are getting expensive
