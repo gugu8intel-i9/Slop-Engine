@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Slop Engine</title>
+  <style>
+    html,body { height:100%; margin:0; background:#000; }
+    #slop-container { width:100vw; height:100vh; overflow:hidden; display:flex; align-items:stretch; }
+    canvas#slop-canvas { width:100%; height:100%; display:block; }
+    /* keep pointer events for UI if you add overlays later */
+  </style>
+</head>
+<body>
+  <div id="slop-container">
+    <canvas id="slop-canvas" tabindex="0" aria-label="Slop Engine canvas"></canvas>
+  </div>
+
+  <!-- Service worker registration (optional; safe if sw.js is present) -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch((err) => {
+        // registration failed — ignore in production or log for debugging
+        console.warn('SW registration failed:', err);
+      });
+    }
+  </script>
+
+  <!-- Main module: keep your existing main.js, which should import/init the wasm pkg.
+       Ensure main.js reads the canvas by id "slop-canvas" and calls the engine init. -->
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
