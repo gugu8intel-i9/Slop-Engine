@@ -1,16 +1,4 @@
 // src/lib.rs
-// Final fixed, drop-in lib.rs compatible with:
-// - wgpu = "22.x"
-// - winit = "0.29.x"
-// - wasm-bindgen for wasm target
-//
-// Key fixes in this version:
-// - Unwrap EventLoop::new() so build(&event_loop) and run() use correct types.
-// - Use wgpu::Gles3MinorVersion::Automatic for gles_minor_version.
-// - Set desired_maximum_frame_latency as a u32.
-// - Use the correct EventLoop::run closure signature (two args).
-// - Use Event::RedrawRequested for rendering and request an initial redraw before run.
-// - Use target.set_control_flow(...) and target.exit() to control the loop.
 
 #![allow(dead_code)]
 #![allow(unused_imports)]
@@ -38,24 +26,21 @@ pub async fn run() {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_native() {
-    // Block on the async runtime to run the same initialization path as wasm.
     pollster::block_on(run_inner());
 }
 
 async fn run_inner() {
-    // Better panic messages in browser console (wasm) and helpful logs everywhere
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let _ = console_log::init_with_level(log::Level::Debug);
 
-    // Create event loop + window
-    // On some platforms EventLoop::new() returns Result; unwrap to get EventLoop.
     let event_loop = EventLoop::new().expect("Failed to create event loop");
-    let window = WindowBuilder::new()
-        .with_title("Slop Engine")
-        .build(&event_loop)
-        .expect("Failed to create window");
+    let window = Arc::new(
+        WindowBuilder::new()
+            .with_title("Slop Engine")
+            .build(&event_loop)
+            .expect("Failed to create window"),
+    );
 
-    // Attach canvas to HTML when running on wasm32
     #[cfg(target_arch = "wasm32")]
     {
         let canvas = window.canvas().expect("No canvas available from winit window");
@@ -77,12 +62,13 @@ async fn run_inner() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
         dx12_shader_compiler: Default::default(),
-        // Provide fields for compatibility across builds
         flags: wgpu::InstanceFlags::empty(),
         gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
     });
 
-    let surface = unsafe { instance.create_surface(&window) }
+    // wgpu 22.x: create_surface is NOT unsafe and accepts Arc<Window>
+    let surface = instance
+        .create_surface(window.clone())
         .expect("Failed to create surface");
 
     let adapter = instance
@@ -110,7 +96,6 @@ async fn run_inner() {
     let device = Arc::new(device);
     let queue = Arc::new(queue);
 
-    // Surface configuration
     let size = window.inner_size();
     let caps = surface.get_capabilities(&adapter);
     let format = caps
@@ -128,70 +113,66 @@ async fn run_inner() {
         present_mode: caps.present_modes[0],
         alpha_mode: caps.alpha_modes[0],
         view_formats: vec![],
-        // desired_maximum_frame_latency expects u32 in this wgpu version
         desired_maximum_frame_latency: 2u32,
     };
 
     surface.configure(&device, &config);
 
-    // Request an initial redraw so we get a RedrawRequested event after run starts.
     window.request_redraw();
 
-    // === Main event loop (winit 0.29 correct signature) ===
-    event_loop.run(move |event, target| {
-        // Default to polling; change to Wait if you prefer lower CPU usage.
-        target.set_control_flow(ControlFlow::Poll);
+    // === Main event loop ===
+    // `window` is now an Arc<Window>, so it can be moved into the closure
+    // without conflicting with `surface` (which holds its own Arc clone).
+    event_loop
+        .run(move |event, target| {
+            target.set_control_flow(ControlFlow::Poll);
 
-        match event {
-            Event::WindowEvent { event, window_id } if window_id == window.id() => {
-                match event {
-                    WindowEvent::CloseRequested => {
-                        // Use the EventLoopWindowTarget to exit cleanly.
-                        target.exit();
-                    }
-
-                    WindowEvent::Resized(new_size) => {
-                        if new_size.width > 0 && new_size.height > 0 {
-                            config.width = new_size.width;
-                            config.height = new_size.height;
-                            surface.configure(&device, &config);
+            match event {
+                Event::WindowEvent { event, window_id } if window_id == window.id() => {
+                    match event {
+                        WindowEvent::CloseRequested => {
+                            target.exit();
                         }
-                    }
 
-                    // In winit 0.29 ScaleFactorChanged no longer carries a size field.
-                    // Use .. to ignore any additional fields (e.g., inner_size_writer).
-                    WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                        // No surface reconfigure here; Resized will follow with the new size.
-                        log::debug!("Scale factor changed: {}", scale_factor);
-                    }
+                        WindowEvent::Resized(new_size) => {
+                            if new_size.width > 0 && new_size.height > 0 {
+                                config.width = new_size.width;
+                                config.height = new_size.height;
+                                surface.configure(&device, &config);
+                            }
+                        }
 
-                    WindowEvent::RedrawRequested => {
-                        render_frame(&surface, &device, &queue, &config);
-                    }
+                        WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                            log::debug!("Scale factor changed: {}", scale_factor);
+                        }
 
-                    _ => {}
+                        WindowEvent::RedrawRequested => {
+                            render_frame(&surface, &device, &queue, &config);
+                        }
+
+                        _ => {}
+                    }
                 }
+
+                _ => {}
             }
-
-            // We rely on the initial window.request_redraw() and RedrawRequested events.
-            // No MainEventsCleared handling here to avoid API mismatches across winit versions.
-
-            _ => {}
-        }
-    });
+        })
+        .expect("Event loop failed");
 }
 
 fn render_frame(
-    surface: &wgpu::Surface,
+    surface: &wgpu::Surface<'_>,
     device: &Arc<wgpu::Device>,
     queue: &Arc<wgpu::Queue>,
     config: &wgpu::SurfaceConfiguration,
 ) {
-    // Acquire frame
     let frame = match surface.get_current_texture() {
         Ok(frame) => frame,
         Err(err) => {
-            log::warn!("Failed to acquire next swap chain texture: {:?}. Reconfiguring surface.", err);
+            log::warn!(
+                "Failed to acquire next swap chain texture: {:?}. Reconfiguring surface.",
+                err
+            );
             surface.configure(device, config);
             match surface.get_current_texture() {
                 Ok(frame) => frame,
@@ -203,7 +184,9 @@ fn render_frame(
         }
     };
 
-    let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let view = frame
+        .texture
+        .create_view(&wgpu::TextureViewDescriptor::default());
 
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("render_encoder"),
@@ -229,7 +212,6 @@ fn render_frame(
             occlusion_query_set: None,
             timestamp_writes: None,
         });
-        // No draw calls in this minimal stub.
     }
 
     queue.submit(Some(encoder.finish()));
