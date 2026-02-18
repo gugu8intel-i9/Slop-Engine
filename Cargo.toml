@@ -10,37 +10,33 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Core engine deps
-wgpu = "22.0"
-winit = { version = "0.29", features = ["rwh_05"] }
+wgpu = "22"
+winit = "0.29"                          # removed rwh_05; wgpu 22 uses rwh 0.6 (winit 0.29 default)
 glam = "0.24"
 
-# bytemuck with derive feature for Pod/Zeroable derives used in code
-bytemuck = { version = "1.25", features = ["derive"] }
+bytemuck = { version = "1", features = ["derive"] }
 
 parking_lot = "0.12"
-anyhow = "1.0"
-lru = "0.8"
-xxhash-rust = "0.8.15"
+anyhow = "1"
+lru = "0.12"                            # 0.8 is yanked / outdated
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 # WASM support
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
-console_log = "1.0"
+console_log = "1"
 log = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "Gpu"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement"] }
 
 # GLTF loader
 gltf = "1"
 gltf-json = "1"
-image = "0.24"
+image = "0.25"                          # 0.24 has dep-resolution conflicts with newer crates
 
 # Utilities
-pollster = "0.3"
+pollster = "0.4"                        # 0.3 is compatible but 0.4 matches wgpu 22 ecosystem
 
 # Shader hot reload / concurrency
-notify = "6.1"
+notify = "6"
 crossbeam-channel = "0.5"
-
-# Optional: add other crates you need below
-# e.g. bytemuck already included above with derive feature
