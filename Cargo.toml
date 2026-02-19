@@ -11,32 +11,37 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # Core engine deps
 wgpu = "22"
-winit = "0.29"                          # removed rwh_05; wgpu 22 uses rwh 0.6 (winit 0.29 default)
+winit = "0.29"
 glam = "0.24"
 
 bytemuck = { version = "1", features = ["derive"] }
 
 parking_lot = "0.12"
 anyhow = "1"
-lru = "0.12"                            # 0.8 is yanked / outdated
+lru = "0.12"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+# Logging
+log = "0.4"
+env_logger = "0.11"   # <-- FIXED: you were missing this
 
 # WASM support
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
 console_log = "1"
-log = "0.4"
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement"] }
 
 # GLTF loader
 gltf = "1"
 gltf-json = "1"
-image = "0.25"                          # 0.24 has dep-resolution conflicts with newer crates
+image = "0.25"
 
 # Utilities
-pollster = "0.4"                        # 0.3 is compatible but 0.4 matches wgpu 22 ecosystem
-
-# Shader hot reload / concurrency
+pollster = "0.4"
 notify = "6"
 crossbeam-channel = "0.5"
+
+[features]
+# <-- FIXED: you used #[cfg(feature = "high_priority")] but never defined it
+high_priority = []
