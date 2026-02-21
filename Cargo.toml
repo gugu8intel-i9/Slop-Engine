@@ -23,11 +23,12 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 # Logging
 log = "0.4"
-env_logger = "0.11"   # <-- FIXED: you were missing this
+env_logger = "0.11"
 
-# WASM support
-wasm-bindgen = "0.2"
+# WASM support (PINNED for wgpu 22 compatibility)
+wasm-bindgen = "=0.2.95"
 wasm-bindgen-futures = "0.4"
+js-sys = "=0.3.72"
 console_error_panic_hook = "0.1"
 console_log = "1"
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement"] }
@@ -43,5 +44,4 @@ notify = "6"
 crossbeam-channel = "0.5"
 
 [features]
-# <-- FIXED: you used #[cfg(feature = "high_priority")] but never defined it
 high_priority = []
