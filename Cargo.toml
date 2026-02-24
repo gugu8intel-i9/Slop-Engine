@@ -6,45 +6,78 @@ edition = "2021"
 [lib]
 name = "slop_engine"
 path = "src/lib.rs"
+# "cdylib" is for dynamic linking (WASM/Shared Lib).
+# "rlib" is for static linking (Static Lib/Executable).
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Core engine deps
+# -----------------------------------
+# Rendering & Windowing
+# -----------------------------------
 wgpu = "22"
 winit = "0.29"
-glam = "0.24"
-
+glam = { version = "0.24", features = ["bytemuck"] } # Added bytemuck feature for faster math casts
 bytemuck = { version = "1", features = ["derive"] }
 
+# -----------------------------------
+# Physics (Rapier)
+# -----------------------------------
+# Added wasm-bindgen feature to ensure compatibility with web builds
+rapier2d = { version = "0.17", features = ["wasm-bindgen"] }
+rapier3d = { version = "0.17", features = ["wasm-bindgen"] }
+nalgebra = "0.32" # Required math lib for Rapier
+
+# -----------------------------------
+# Concurrency & Utilities
+# -----------------------------------
 parking_lot = "0.12"
 anyhow = "1"
-
-# ✅ SECURITY FIX — upgraded from 0.12 (vulnerable)
-lru = "0.16.3"
-
+lru = "0.16.3" # Fixed security vulnerability from 0.12
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+crossbeam = "0.8" # Upgraded from 0.5 for channel performance
 
+# -----------------------------------
 # Logging
+# -----------------------------------
 log = "0.4"
 env_logger = "0.11"
 
-# WASM support (PINNED for wgpu 22 compatibility)
+# -----------------------------------
+# WASM Support
+# -----------------------------------
+# Pinning versions strictly to ensure wgpu 22 compatibility
 wasm-bindgen = "=0.2.95"
 wasm-bindgen-futures = "0.4"
 js-sys = "=0.3.72"
 console_error_panic_hook = "0.1"
 console_log = "1"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement"] }
+web-sys = { version = "=0.3.72", features = [
+    "Window", 
+    "Document", 
+    "Element", 
+    "HtmlCanvasElement"
+] }
 
-# GLTF loader
+# -----------------------------------
+# Assets & Loading
+# -----------------------------------
 gltf = "1"
 gltf-json = "1"
-image = "0.25"
-
-# Utilities
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] } # Optimized: only enable formats you need
 pollster = "0.4"
 notify = "6"
-crossbeam-channel = "0.5"
 
 [features]
+default = []
 high_priority = []
+
+# -----------------------------------
+# Optimization Profiles
+# -----------------------------------
+# Essential for a "faster than three.js" engine on Web
+[profile.release]
+opt-level = 3      
+lto = "fat"        # Link Time Optimization: removes dead code, inlines across crates
+codegen-units = 1  # Better optimization at the cost of compile time
+panic = "abort"    # Smaller binary size, no unwinding overhead
+strip = true       # Strip symbols
