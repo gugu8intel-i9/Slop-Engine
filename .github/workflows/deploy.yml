@@ -31,13 +31,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Install wasm-pack
+      - name: Install and Build
         run: |
           curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-          ~/.cargo/bin/wasm-pack --version
-
-      - name: Build wasm
-        run: ~/.cargo/bin/wasm-pack build --target web --release
+          ~/.cargo/bin/wasm-pack build --target web --release
 
       - name: Prepare deploy directory
         run: |
