@@ -15,32 +15,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Add wasm target
-        run: rustup target add wasm32-unknown-unknown
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache Cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-cargo-build-
+
+      - name: Cache wasm-pack
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/.wasm-pack
+          key: ${{ runner.os }}-wasm-pack
 
       - name: Install wasm-pack
-        uses: jetli/wasm-pack-action@v0.4.0
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - name: Verify wasm-pack and wasm-opt
-        run: |
-          echo "=== PATH ==="
-          echo "$PATH"
-          echo "=== wasm-pack ==="
-          which wasm-pack || true
-          wasm-pack --version || true
-          echo "=== wasm-opt (if present) ==="
-          which wasm-opt || true
-          wasm-opt --version || true
+      - name: Build wasm
+        run: wasm-pack build --target web --release
 
-      - name: Build wasm (enable wasm-opt bulk-memory if used)
-        env:
-          WASM_OPT_FLAGS: "--enable-bulk-memory"
+      - name: Prepare deploy directory
         run: |
-          echo "WASM_OPT_FLAGS=$WASM_OPT_FLAGS"
-          wasm-pack build --target web --release
+          mkdir -p dist
+          cp index.html dist/ 2>/dev/null || true
+          cp -r pkg dist/pkg
+          cp *.js dist/ 2>/dev/null || true
+          cp *.css dist/ 2>/dev/null || true
+          cp -r assets dist/assets 2>/dev/null || true
 
       - name: Deploy to GH Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
+          publish_dir: ./dist
