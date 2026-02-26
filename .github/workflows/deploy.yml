@@ -15,17 +15,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: rustup target add wasm32-unknown-unknown
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
 
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
 
-      - name: Verify wasm-pack
+      - name: Verify wasm-pack and wasm-opt
         run: |
-          which wasm-pack
-          wasm-pack --version
+          echo "=== PATH ==="
+          echo "$PATH"
+          echo "=== wasm-pack ==="
+          which wasm-pack || true
+          wasm-pack --version || true
+          echo "=== wasm-opt (if present) ==="
+          which wasm-opt || true
+          wasm-opt --version || true
 
-      - run: wasm-pack build --target web --release
+      - name: Build wasm (enable wasm-opt bulk-memory if used)
+        env:
+          WASM_OPT_FLAGS: "--enable-bulk-memory"
+        run: |
+          echo "WASM_OPT_FLAGS=$WASM_OPT_FLAGS"
+          wasm-pack build --target web --release
 
       - name: Deploy to GH Pages
         uses: peaceiris/actions-gh-pages@v3
