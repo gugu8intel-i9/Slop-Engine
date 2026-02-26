@@ -20,35 +20,35 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Cache Cargo registry
+      - name: Cache Cargo
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+            ~/.cargo/bin
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-registry-
-
-      - name: Cache Cargo build
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/Cargo.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}-
-            ${{ runner.os }}-cargo-build-
+            ${{ runner.os }}-cargo-
 
       - name: Install wasm-pack
         run: |
-          cargo install wasm-pack
+          export PATH="$HOME/.cargo/bin:$PATH"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-
-      - name: Verify wasm-pack
-        run: wasm-pack --version
+          if ! command -v wasm-pack &> /dev/null; then
+            echo "Installing wasm-pack..."
+            cargo install wasm-pack --locked
+          else
+            echo "wasm-pack already cached"
+          fi
+          wasm-pack --version
 
       - name: Build wasm
-        run: wasm-pack build --target web --release
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          wasm-pack --version
+          wasm-pack build --target web --release
 
       - name: Prepare deploy directory
         run: |
