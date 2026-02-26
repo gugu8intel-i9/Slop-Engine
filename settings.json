@@ -1,0 +1,193 @@
+{
+  "_comment": "High-performance settings for Slop Engine",
+
+  "window": {
+    "title": "My Game",
+    "width": 1920,
+    "height": 1080,
+    "fullscreen": false,
+    "vsync": true,
+    "resizable": true,
+    "maximized": false
+  },
+
+  "rendering": {
+    "quality_preset": "high",
+    "target_frame_rate": 60,
+    "resolution_scale": 1.0,
+    "anti_aliasing": {
+      "enabled": true,
+      "mode": "taa",
+      "taa": {
+        "jitter_scale": 1.0,
+        "sample_count": 4,
+        "sharpness": 0.5
+      }
+    },
+    "culling": {
+      "frustum_culling": true,
+      "occlusion_culling": false,
+      "hierarchical_z": false
+    },
+    "wireframe": false,
+    "debug_overlay": false
+  },
+
+  "shadows": {
+    "enabled": true,
+    "resolution": 2048,
+    "soft_shadows": true,
+    "pcf_samples": 16,
+    "cascade_count": 4,
+    "cascade_split_lambda": 0.95,
+    "max_distance": 100.0,
+    "shadow_map_format": "depth32float"
+  },
+
+  "post_processing": {
+    "bloom": {
+      "enabled": true,
+      "intensity": 1.0,
+      "radius": 0.05,
+      "threshold": 0.8,
+      "soft_knee": 0.5,
+      "downsample_passes": 5
+    },
+    "ssao": {
+      "enabled": true,
+      "radius": 0.5,
+      "bias": 0.025,
+      "power": 2.0,
+      "sample_count": 16,
+      "blur": true
+    },
+    "ssr": {
+      "enabled": false,
+      "max_steps": 64,
+      "thickness": 0.1,
+      "screen_edge_fade": 0.1,
+      "jitter": 0.05
+    },
+    "dof": {
+      "enabled": false,
+      "focus_distance": 10.0,
+      "aperture": 0.1,
+      "focal_length": 50.0,
+      "blur_quality": "medium"
+    },
+    "motion_blur": {
+      "enabled": false,
+      "intensity": 0.5,
+      "sample_count": 8
+    },
+    "film_grain": {
+      "enabled": false,
+      "intensity": 0.05
+    },
+    "vignette": {
+      "enabled": false,
+      "intensity": 0.3,
+      "roundness": 0.5,
+      "smoothness": 0.5
+    }
+  },
+
+  "lighting": {
+    "max_directional_lights": 4,
+    "max_point_lights": 32,
+    "max_spot_lights": 32,
+    "ambient_intensity": 0.2,
+    "ibl_intensity": 1.0,
+    "specular_aa": true
+  },
+
+  "camera": {
+    "default_fov": 75.0,
+    "near_plane": 0.1,
+    "far_plane": 1000.0,
+    "controller": {
+      "sensitivity": 0.005,
+      "move_speed": 5.0,
+      "sprint_multiplier": 2.0,
+      "invert_y": false,
+      "enable_fly_mode": true
+    }
+  },
+
+  "physics": {
+    "enabled": true,
+    "gravity": [0.0, -9.81, 0.0],
+    "fixed_timestep": 0.0166667,
+    "max_substeps": 10,
+    "debug_draw": false,
+    "broad_phase": "sweep_and_prune"
+  },
+
+  "input": {
+    "mouse": {
+      "sensitivity": 1.0,
+      "raw_input": true,
+      "smooth": false
+    },
+    "keyboard": {
+      "key_repeat_delay": 0.5,
+      "key_repeat_interval": 0.03
+    },
+    "gamepad": {
+      "enabled": true,
+      "deadzone": 0.2
+    },
+    "bindings": {
+      "move_forward": "KeyW",
+      "move_backward": "KeyS",
+      "move_left": "KeyA",
+      "move_right": "KeyD",
+      "sprint": "ShiftLeft",
+      "jump": "Space",
+      "crouch": "ControlLeft",
+      "interact": "KeyE",
+      "toggle_menu": "Escape",
+      "toggle_debug": "F3",
+      "screenshot": "F12"
+    }
+  },
+
+  "debug": {
+    "show_fps": true,
+    "show_stats": false,
+    "show_physics_debug": false,
+    "show_bounding_boxes": false,
+    "show_light_frustums": false,
+    "log_level": "info",
+    "hot_reload_shaders": true,
+    "hot_reload_assets": true
+  },
+
+  "performance": {
+    "target_frame_rate": 60,
+    "dynamic_resolution": false,
+    "dynamic_resolution_min_scale": 0.5,
+    "dynamic_resolution_max_scale": 1.0,
+    "gpu_upload_heaps": 4,
+    "texture_pool_size": 256,
+    "mesh_pool_size": 512,
+    "material_pool_size": 1024,
+    "light_pool_size": 128
+  },
+
+  "assets": {
+    "texture_compression": "bc7",
+    "generate_mipmaps": true,
+    "anisotropy_level": 16,
+    "max_texture_size": 4096,
+    "load_async": true,
+    "cache_size_mb": 512
+  },
+
+  "shaders": {
+    "shader_model": "wgsl",
+    "enable_validation": false,
+    "optimization_level": 3,
+    "debug_symbols": false
+  }
+}
