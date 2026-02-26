@@ -16,11 +16,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - run: rustup target add wasm32-unknown-unknown
-      - run: cargo install wasm-pack
+
+      - name: Install latest wasm-pack
+        run: |
+          curl -sSfL https://github.com/rustwasm/wasm-pack/releases/latest/download/wasm-pack-init.sh | sh
+
       - run: wasm-pack build --target web --release
 
       - name: Deploy to GH Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./ # Ensure your index.html and /pkg are here
+          publish_dir: ./
