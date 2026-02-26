@@ -6,8 +6,6 @@ edition = "2021"
 [lib]
 name = "slop_engine"
 path = "src/lib.rs"
-# "cdylib" is for dynamic linking (WASM/Shared Lib).
-# "rlib" is for static linking (Static Lib/Executable).
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
@@ -16,25 +14,24 @@ crate-type = ["cdylib", "rlib"]
 # -----------------------------------
 wgpu = "22"
 winit = "0.29"
-glam = { version = "0.24", features = ["bytemuck"] } # Added bytemuck feature for faster math casts
+glam = { version = "0.24", features = ["bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
 
 # -----------------------------------
 # Physics (Rapier)
 # -----------------------------------
-# Added wasm-bindgen feature to ensure compatibility with web builds
 rapier2d = { version = "0.17", features = ["wasm-bindgen"] }
 rapier3d = { version = "0.17", features = ["wasm-bindgen"] }
-nalgebra = "0.32" # Required math lib for Rapier
+nalgebra = "0.32"
 
 # -----------------------------------
 # Concurrency & Utilities
 # -----------------------------------
 parking_lot = "0.12"
 anyhow = "1"
-lru = "0.16.3" # Fixed security vulnerability from 0.12
+lru = "0.16.3"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
-crossbeam = "0.8" # Upgraded from 0.5 for channel performance
+crossbeam = "0.8"
 
 # -----------------------------------
 # Logging
@@ -45,7 +42,6 @@ env_logger = "0.11"
 # -----------------------------------
 # WASM Support
 # -----------------------------------
-# Pinning versions strictly to ensure wgpu 22 compatibility
 wasm-bindgen = "=0.2.95"
 wasm-bindgen-futures = "0.4"
 js-sys = "=0.3.72"
@@ -63,7 +59,7 @@ web-sys = { version = "=0.3.72", features = [
 # -----------------------------------
 gltf = "1"
 gltf-json = "1"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] } # Optimized: only enable formats you need
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 pollster = "0.4"
 notify = "6"
 
@@ -74,10 +70,12 @@ high_priority = []
 # -----------------------------------
 # Optimization Profiles
 # -----------------------------------
-# Essential for a "faster than three.js" engine on Web
 [profile.release]
 opt-level = 3      
-lto = "fat"        # Link Time Optimization: removes dead code, inlines across crates
-codegen-units = 1  # Better optimization at the cost of compile time
-panic = "abort"    # Smaller binary size, no unwinding overhead
-strip = true       # Strip symbols
+lto = "fat"        
+codegen-units = 1  
+panic = "abort"    
+strip = true       
+
+[package.metadata.wasm-pack]
+wasm-opt = false
