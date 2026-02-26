@@ -1,22 +1,31 @@
-name: Rust
+name: Deploy Slop Engine
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches: [main]
 
-env:
-  CARGO_TERM_COLOR: always
+permissions:
+  contents: write
+  pages: write
+  id-token: write
 
 jobs:
-  build:
-
+  build-deploy:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - uses: actions/checkout@v4
+
+      - run: rustup target add wasm32-unknown-unknown
+
+      - name: Install latest wasm-pack
+        run: |
+          curl -sSfL https://github.com/rustwasm/wasm-pack/releases/latest/download/wasm-pack-init.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - run: wasm-pack build --target web --release
+
+      - name: Deploy to GH Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
