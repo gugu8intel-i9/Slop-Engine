@@ -32,9 +32,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Install wasm-pack
-        uses: jetli/wasm-pack-action@v0.4.0
-        with:
-          version: 'latest'
+        run: cargo install wasm-pack
 
       - name: Build WebAssembly
         run: wasm-pack build --target web --release
