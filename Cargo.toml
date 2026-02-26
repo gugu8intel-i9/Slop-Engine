@@ -48,9 +48,9 @@ js-sys = "=0.3.72"
 console_error_panic_hook = "0.1"
 console_log = "1"
 web-sys = { version = "=0.3.72", features = [
-    "Window", 
-    "Document", 
-    "Element", 
+    "Window",
+    "Document",
+    "Element",
     "HtmlCanvasElement"
 ] }
 
@@ -66,16 +66,17 @@ notify = "6"
 [features]
 default = []
 high_priority = []
+lru_safe = []
 
 # -----------------------------------
 # Optimization Profiles
 # -----------------------------------
 [profile.release]
-opt-level = 3      
-lto = "fat"        
-codegen-units = 1  
-panic = "abort"    
-strip = true       
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
 
 [package.metadata.wasm-pack]
 wasm-opt = false
