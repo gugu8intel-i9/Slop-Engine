@@ -39,14 +39,13 @@ jobs:
             ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}-
             ${{ runner.os }}-cargo-build-
 
-      - name: Cache wasm-pack
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/.wasm-pack
-          key: ${{ runner.os }}-wasm-pack
-
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: |
+          cargo install wasm-pack
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Verify wasm-pack
+        run: wasm-pack --version
 
       - name: Build wasm
         run: wasm-pack build --target web --release
