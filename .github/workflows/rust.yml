@@ -15,17 +15,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: rustup target add wasm32-unknown-unknown
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
-      - name: Install latest wasm-pack
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install and Build
         run: |
-          curl -sSfL https://github.com/rustwasm/wasm-pack/releases/latest/download/wasm-pack-init.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+          ~/.cargo/bin/wasm-pack build --target web --release
 
-      - run: wasm-pack build --target web --release
+      - name: Prepare deploy directory
+        run: |
+          mkdir -p dist
+          cp index.html dist/ 2>/dev/null || true
+          cp -r pkg dist/pkg
+          cp *.js dist/ 2>/dev/null || true
+          cp *.css dist/ 2>/dev/null || true
+          cp -r assets dist/assets 2>/dev/null || true
 
       - name: Deploy to GH Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
+          publish_dir: ./dist
