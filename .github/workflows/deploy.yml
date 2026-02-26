@@ -17,9 +17,8 @@ jobs:
 
       - run: rustup target add wasm32-unknown-unknown
 
-      - name: Install latest wasm-pack
-        run: |
-          curl -sSfL https://github.com/rustwasm/wasm-pack/releases/latest/download/wasm-pack-init.sh | sh
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
 
       - run: wasm-pack build --target web --release
 
