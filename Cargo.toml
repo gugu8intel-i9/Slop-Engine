@@ -54,20 +54,16 @@ lru_safe = []
 # Native-Only Dependencies
 # ===================================
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# Audio (Required for user uploads + playback)
 rodio = { version = "0.17", features = ["symphonia-all"] }
 env_logger = "0.11"
 notify = "6"
 pollster = "0.3"
-# WARNING: Crossbeam is heavy and hard to compile for WASM. 
-# If you get WASM build errors, disable this or put it behind a feature flag.
 crossbeam = "0.8"
 
 # ===================================
 # WASM-Only Dependencies
 # ===================================
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# Audio (Context, AudioBuffers, File reading)
 web-sys = { version = "0.3", features = [
     "Window", "Document", "Element", "HtmlCanvasElement",
     "AudioContext", "AudioBuffer", "AudioBufferSourceNode", "GainNode",
@@ -82,19 +78,16 @@ console_log = "1"
 # -----------------------------------
 # Optimization Profiles
 # -----------------------------------
-
-# Dev builds should be fast to compile
 [profile.dev]
 opt-level = 1
 debug = true
 split-debuginfo = "unpacked"
 
-# Release builds should be tiny and fast
 [profile.release]
 opt-level = 3
-lto = "fat"       # "fat" is slower to compile but faster runtime. Use "thin" for faster compiles.
+lto = "fat"
 codegen-units = 1
-panic = "abort"   # Abort reduces WASM size significantly
+panic = "abort"
 strip = true
 
 [package.metadata.wasm-pack.profile.release]
