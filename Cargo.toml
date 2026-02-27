@@ -20,12 +20,9 @@ bytemuck = { version = "1", features = ["derive"] }
 # -----------------------------------
 # Physics (Rapier)
 # -----------------------------------
-# IMPORTANT: If you use Nalgebra structs (Vector3, etc) with Rapier, 
-# you MUST enable "nalgebra-convert". 
-# OR switch to Rapier's built-in simba math.
-rapier2d = { version = "0.17", features = ["wasm-bindgen", "simba-is-enabled"] }
-rapier3d = { version = "0.17", features = ["wasm-bindgen", "simba-is-enabled"] }
-nalgebra = { version = "0.32", features = ["bytemuck"] } # Keep only if you need it separate from Rapier
+rapier2d = { version = "0.17", features = ["wasm-bindgen"] }
+rapier3d = { version = "0.17", features = ["wasm-bindgen"] }
+nalgebra = { version = "0.32", features = ["bytemuck"] }
 
 # -----------------------------------
 # Concurrency & Utilities
