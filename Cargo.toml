@@ -13,16 +13,19 @@ crate-type = ["cdylib", "rlib"]
 # Rendering & Windowing
 # -----------------------------------
 wgpu = "22"
-winit = "0.30" # Updated to match wgpu 22
+winit = "0.30"
 glam = { version = "0.24", features = ["bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
 
 # -----------------------------------
 # Physics (Rapier)
 # -----------------------------------
-rapier2d = { version = "0.17", features = ["wasm-bindgen"] }
-rapier3d = { version = "0.17", features = ["wasm-bindgen"] }
-nalgebra = "0.32"
+# IMPORTANT: If you use Nalgebra structs (Vector3, etc) with Rapier, 
+# you MUST enable "nalgebra-convert". 
+# OR switch to Rapier's built-in simba math.
+rapier2d = { version = "0.17", features = ["wasm-bindgen", "simba-is-enabled"] }
+rapier3d = { version = "0.17", features = ["wasm-bindgen", "simba-is-enabled"] }
+nalgebra = { version = "0.32", features = ["bytemuck"] } # Keep only if you need it separate from Rapier
 
 # -----------------------------------
 # Concurrency & Utilities
@@ -34,11 +37,32 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 log = "0.4"
 
 # -----------------------------------
+# Audio (Required for user uploads + playback)
+# -----------------------------------
+# For Native
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rodio = { version = "0.17", features = ["symphonia-all"] }
+
+# For Web (Context, AudioBuffers, File reading)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "Element", "HtmlCanvasElement",
+    "AudioContext", "AudioBuffer", "AudioBufferSourceNode", "GainNode",
+    "File", "FileReader", "Blob", "Url", "Response"
+]}
+js-sys = "0.3"
+
+# -----------------------------------
 # Assets & Loading
 # -----------------------------------
 gltf = "1"
 gltf-json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+# -----------------------------------
+# Randomness (Required for WASM)
+# -----------------------------------
+getrandom = { version = "0.2", features = ["js"] }
 
 [features]
 default = []
@@ -50,35 +74,38 @@ lru_safe = []
 # ===================================
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 env_logger = "0.11"
-notify = "6"        # File watching only works on native OS
-pollster = "0.3"    # Blocking async executor for native
-crossbeam = "0.8"   # Threading (requires special setup on WASM, safest to keep native-only for now)
+notify = "6"
+pollster = "0.3"
+# WARNING: Crossbeam is heavy and hard to compile for WASM. 
+# If you get WASM build errors, disable this or put it behind a feature flag.
+crossbeam = "0.8"
 
 # ===================================
 # WASM-Only Dependencies
 # ===================================
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "=0.2.95"
+wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-js-sys = "=0.3.72"
 console_error_panic_hook = "0.1"
 console_log = "1"
-web-sys = { version = "=0.3.72", features = [
-    "Window",
-    "Document",
-    "Element",
-    "HtmlCanvasElement"
-] }
 
 # -----------------------------------
 # Optimization Profiles
 # -----------------------------------
+
+# Dev builds should be fast to compile
+[profile.dev]
+opt-level = 1
+debug = true
+split-debuginfo = "unpacked"
+
+# Release builds should be tiny and fast
 [profile.release]
 opt-level = 3
-lto = "fat"
+lto = "fat"       # "fat" is slower to compile but faster runtime. Use "thin" for faster compiles.
 codegen-units = 1
-panic = "abort"
+panic = "abort"   # Abort reduces WASM size significantly
 strip = true
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+wasm-opt = ["-O4", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
