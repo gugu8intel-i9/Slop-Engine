@@ -13,7 +13,7 @@ crate-type = ["cdylib", "rlib"]
 # Rendering & Windowing
 # -----------------------------------
 wgpu = "22"
-winit = "0.29"
+winit = "0.30" # Updated to match wgpu 22
 glam = { version = "0.24", features = ["bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
 
@@ -31,17 +31,33 @@ parking_lot = "0.12"
 anyhow = "1"
 lru = "0.16.3"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
-crossbeam = "0.8"
-
-# -----------------------------------
-# Logging
-# -----------------------------------
 log = "0.4"
-env_logger = "0.11"
 
 # -----------------------------------
-# WASM Support
+# Assets & Loading
 # -----------------------------------
+gltf = "1"
+gltf-json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+[features]
+default = []
+high_priority = []
+lru_safe = []
+
+# ===================================
+# Native-Only Dependencies
+# ===================================
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+env_logger = "0.11"
+notify = "6"        # File watching only works on native OS
+pollster = "0.3"    # Blocking async executor for native
+crossbeam = "0.8"   # Threading (requires special setup on WASM, safest to keep native-only for now)
+
+# ===================================
+# WASM-Only Dependencies
+# ===================================
+[target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "=0.2.95"
 wasm-bindgen-futures = "0.4"
 js-sys = "=0.3.72"
@@ -53,20 +69,6 @@ web-sys = { version = "=0.3.72", features = [
     "Element",
     "HtmlCanvasElement"
 ] }
-
-# -----------------------------------
-# Assets & Loading
-# -----------------------------------
-gltf = "1"
-gltf-json = "1"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-pollster = "0.4"
-notify = "6"
-
-[features]
-default = []
-high_priority = []
-lru_safe = []
 
 # -----------------------------------
 # Optimization Profiles
