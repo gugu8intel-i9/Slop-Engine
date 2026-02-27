@@ -37,22 +37,6 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 log = "0.4"
 
 # -----------------------------------
-# Audio (Required for user uploads + playback)
-# -----------------------------------
-# For Native
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rodio = { version = "0.17", features = ["symphonia-all"] }
-
-# For Web (Context, AudioBuffers, File reading)
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = { version = "0.3", features = [
-    "Window", "Document", "Element", "HtmlCanvasElement",
-    "AudioContext", "AudioBuffer", "AudioBufferSourceNode", "GainNode",
-    "File", "FileReader", "Blob", "Url", "Response"
-]}
-js-sys = "0.3"
-
-# -----------------------------------
 # Assets & Loading
 # -----------------------------------
 gltf = "1"
@@ -73,6 +57,8 @@ lru_safe = []
 # Native-Only Dependencies
 # ===================================
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Audio (Required for user uploads + playback)
+rodio = { version = "0.17", features = ["symphonia-all"] }
 env_logger = "0.11"
 notify = "6"
 pollster = "0.3"
@@ -84,6 +70,13 @@ crossbeam = "0.8"
 # WASM-Only Dependencies
 # ===================================
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# Audio (Context, AudioBuffers, File reading)
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "Element", "HtmlCanvasElement",
+    "AudioContext", "AudioBuffer", "AudioBufferSourceNode", "GainNode",
+    "File", "FileReader", "Blob", "Url", "Response"
+]}
+js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
