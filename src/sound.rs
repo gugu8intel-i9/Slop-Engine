@@ -1,5 +1,13 @@
 // src/sound.rs
+// At the top of audio.rs or sound.rs
 
+#[cfg(not(target_arch = "wasm32"))]
+use rodio as audio_backend;
+#[cfg(not(target_arch = "wasm32"))]
+use rodio::Decoder;
+
+#[cfg(target_arch = "wasm32")]
+use web_sys as audio_backend; // Placeholder, you'll need a JS glue layer or a pure Rust web audio crate like `web-audio`
 use rodio::{Decoder, OutputStream, Sink, Source};
 use std::fs::File;
 use std::io::{BufReader, Cursor};
