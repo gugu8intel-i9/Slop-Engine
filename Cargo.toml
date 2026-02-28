@@ -6,29 +6,37 @@ edition = "2021"
 [lib]
 name = "slop_engine"
 path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib", "rlib"] # cdylib for WASM, rlib for Native
+
+[features]
+default = []
+# High-performance features (Native only)
+high_priority = ["dep:thread-priority"]
+mimalloc = ["dep:mimalloc"]
+tokio_runtime = ["dep:tokio"]
+lru_safe = []
 
 [dependencies]
 # -----------------------------------
 # Rendering & Windowing
 # -----------------------------------
-wgpu = "22"
+wgpu = "22.0"
 winit = "0.30"
 glam = { version = "0.24", features = ["bytemuck"] }
-bytemuck = { version = "1", features = ["derive"] }
+bytemuck = { version = "1.16", features = ["derive"] }
 
 # -----------------------------------
-# Physics (Rapier)
+# Physics & Math (Rapier)
 # -----------------------------------
 rapier2d = { version = "0.17", features = ["wasm-bindgen"] }
 rapier3d = { version = "0.17", features = ["wasm-bindgen"] }
 nalgebra = { version = "0.32", features = ["bytemuck"] }
 
 # -----------------------------------
-# Concurrency & Utilities
+# Concurrency, State, & Utilities
 # -----------------------------------
 parking_lot = "0.12"
-anyhow = "1"
+anyhow = "1.0"
 lru = "0.16.3"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 log = "0.4"
@@ -36,34 +44,32 @@ log = "0.4"
 # -----------------------------------
 # Assets & Loading
 # -----------------------------------
-gltf = "1"
-gltf-json = "1"
+gltf = "1.4"
+gltf-json = "1.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
-# -----------------------------------
-# Randomness (Required for WASM)
-# -----------------------------------
-getrandom = { version = "0.2", features = ["js"] }
-
-[features]
-default = []
-high_priority = []
-lru_safe = []
-
 # ===================================
-# Native-Only Dependencies
+# Native-Only Dependencies (Windows/Mac/Linux)
 # ===================================
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rodio = { version = "0.17", features = ["symphonia-all"] }
 env_logger = "0.11"
-notify = "6"
+notify = "6.1"
 pollster = "0.3"
 crossbeam = "0.8"
 
+# Optional High-Performance Native Crates
+mimalloc = { version = "0.1", optional = true }
+thread-priority = { version = "1.1", optional = true }
+tokio = { version = "1.37", features = ["rt-multi-thread", "time", "net"], optional = true }
+
 # ===================================
-# WASM-Only Dependencies
+# WASM-Only Dependencies (Web)
 # ===================================
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# Randomness required for WASM wgpu/uuid generations
+getrandom = { version = "0.2", features = ["js"] }
+
 web-sys = { version = "0.3", features = [
     "Window", "Document", "Element", "HtmlCanvasElement",
     "AudioContext", "AudioBuffer", "AudioBufferSourceNode", "GainNode",
@@ -73,22 +79,31 @@ js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
-console_log = "1"
+console_log = "1.0"
 
-# -----------------------------------
+# ===================================
 # Optimization Profiles
-# -----------------------------------
+# ===================================
+
 [profile.dev]
 opt-level = 1
 debug = true
-split-debuginfo = "unpacked"
+split-debuginfo = "unpacked" # Faster compilation on mac/linux
+
+# 🔥 ENGINE SECRET SAUCE:
+# Compile all dependencies with max optimization even in debug mode.
+# This keeps your Physics (Rapier) and Renderer (wgpu) running at 60+ FPS 
+# during development, while your own code compiles instantly.
+[profile.dev.package."*"]
+opt-level = 3
 
 [profile.release]
 opt-level = 3
-lto = "fat"
-codegen-units = 1
-panic = "abort"
-strip = true
+lto = "fat"            # Maximize performance across crate boundaries
+codegen-units = 1      # Slower compile, but significantly faster binary
+strip = true           # Strip symbols (smaller binary size)
+# Removed `panic = "abort"` so `catch_unwind` and our crash-logger in main.rs actually work!
 
+# Aggressive WASM size/speed optimizations
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-O4", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
