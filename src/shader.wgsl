@@ -2,30 +2,30 @@
 
 // Group 0: per-frame camera / mode / light
 struct CameraUniform {
-    view_proj: mat4x4<f32>;
-    view_pos: vec4<f32>; // xyz = camera position
-    mode: u32;           // 0 = 2D, 1 = 3D
-    _pad: vec3<f32>;
+    view_proj: mat4x4<f32>,
+    view_pos: vec4<f32>, // xyz = camera position
+    mode: u32,           // 0 = 2D, 1 = 3D
+    _pad: vec3<f32>,
 };
 @group(0) @binding(0)
 var<uniform> uCamera: CameraUniform;
 
 // Light (only used in 3D)
 struct Light {
-    direction: vec4<f32>; // xyz normalized, w = intensity
-    color: vec4<f32>;
+    direction: vec4<f32>, // xyz normalized, w = intensity
+    color: vec4<f32>,
 };
 @group(0) @binding(1)
 var<uniform> uLight: Light;
 
 // Group 1: material params + textures
 struct MaterialParams {
-    base_color_factor: vec4<f32>;
-    metallic_factor: f32;
-    roughness_factor: f32;
-    ao_factor: f32;
-    flags: u32; // bit0=base_color_tex, bit1=mr_tex, bit2=normal_tex, bit3=ao_tex
-    _pad: vec3<f32>;
+    base_color_factor: vec4<f32>,
+    metallic_factor: f32,
+    roughness_factor: f32,
+    ao_factor: f32,
+    flags: u32, // bit0=base_color_tex, bit1=mr_tex, bit2=normal_tex, bit3=ao_tex
+    _pad: vec3<f32>,
 };
 @group(1) @binding(0)
 var<uniform> uMaterial: MaterialParams;
@@ -42,28 +42,28 @@ var<uniform> uModel: mat4x4<f32>;
 
 // ---------- Vertex input (single interleaved layout) ----------
 struct VertexInput {
-    @location(0) position: vec3<f32>; // for 2D: z ignored
-    @location(1) normal: vec3<f32>;   // optional for 2D
-    @location(2) uv: vec2<f32>;
-    @location(3) tangent: vec3<f32>;  // optional for 2D
+    @location(0) position: vec3<f32>, // for 2D: z ignored
+    @location(1) normal: vec3<f32>,   // optional for 2D
+    @location(2) uv: vec2<f32>,
+    @location(3) tangent: vec3<f32>,  // optional for 2D
 };
 
 // ---------- VS -> FS payload ----------
 struct VSOut {
-    @builtin(position) clip_pos: vec4<f32>;
-    @location(0) world_pos: vec3<f32>;
-    @location(1) normal: vec3<f32>;
-    @location(2) uv: vec2<f32>;
-    @location(3) tangent: vec3<f32>;
+    @builtin(position) clip_pos: vec4<f32>,
+    @location(0) world_pos: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(3) tangent: vec3<f32>,
 };
 
 // ---------- Vertex shader ----------
 @vertex
-fn vs_main(in: VertexInput) -> VSOut {
+fn vs_main(input: VertexInput) -> VSOut {
     var out: VSOut;
 
     // Compute world position (works for 2D and 3D)
-    let world_pos4 = uModel * vec4<f32>(in.position, 1.0);
+    let world_pos4 = uModel * vec4<f32>(input.position, 1.0);
     out.world_pos = world_pos4.xyz;
 
     // For 2D mode we still produce a clip position using view_proj,
@@ -71,13 +71,13 @@ fn vs_main(in: VertexInput) -> VSOut {
     out.clip_pos = uCamera.view_proj * world_pos4;
 
     // Transform normals/tangents (cheap if mode==2D they may be unused)
-    let n4 = uModel * vec4<f32>(in.normal, 0.0);
+    let n4 = uModel * vec4<f32>(input.normal, 0.0);
     out.normal = normalize(n4.xyz);
 
-    let t4 = uModel * vec4<f32>(in.tangent, 0.0);
+    let t4 = uModel * vec4<f32>(input.tangent, 0.0);
     out.tangent = normalize(t4.xyz);
 
-    out.uv = in.uv;
+    out.uv = input.uv;
     return out;
 }
 
@@ -118,32 +118,30 @@ fn apply_normal_map(nmap: vec3<f32>, N: vec3<f32>, T: vec3<f32>) -> vec3<f32> {
 
 // ---------- Fragment input / output ----------
 struct FSIn {
-    @location(0) world_pos: vec3<f32>;
-    @location(1) normal: vec3<f32>;
-    @location(2) uv: vec2<f32>;
-    @location(3) tangent: vec3<f32>;
+    @location(0) world_pos: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(3) tangent: vec3<f32>,
 };
 
 struct FSOut {
-    @location(0) color: vec4<f32>;
+    @location(0) color: vec4<f32>,
 };
 
 // ---------- Fragment shader (2D fast path vs 3D PBR path) ----------
 @fragment
-fn fs_main(in: FSIn) -> FSOut {
+fn fs_main(input: FSIn) -> FSOut {
     // Mode check (0 = 2D, 1 = 3D)
     let mode3d = (uCamera.mode == 1u);
 
     // --- Base color (both modes) ---
     var base_color = uMaterial.base_color_factor.rgb;
     if ((uMaterial.flags & 1u) != 0u) {
-        base_color = textureSample(base_color_tex, linear_sampler, in.uv).rgb * uMaterial.base_color_factor.rgb;
+        base_color = textureSample(base_color_tex, linear_sampler, input.uv).rgb * uMaterial.base_color_factor.rgb;
     }
 
     // Fast 2D path: minimal math, no lighting, no normal maps
     if (!mode3d) {
-        // Simple alpha handling could be added if needed
-        // Return sRGB-corrected color (assume pipeline expects linear; do gamma here if desired)
         return FSOut(vec4<f32>(base_color, uMaterial.base_color_factor.a));
     }
 
@@ -152,7 +150,7 @@ fn fs_main(in: FSIn) -> FSOut {
     var metallic = uMaterial.metallic_factor;
     var roughness = saturate(uMaterial.roughness_factor);
     if ((uMaterial.flags & 2u) != 0u) {
-        let mr = textureSample(mr_tex, linear_sampler, in.uv).rgb;
+        let mr = textureSample(mr_tex, linear_sampler, input.uv).rgb;
         metallic = mr.b * metallic;
         roughness = saturate(mr.g * roughness);
     }
@@ -160,18 +158,18 @@ fn fs_main(in: FSIn) -> FSOut {
     // AO
     var ao = uMaterial.ao_factor;
     if ((uMaterial.flags & 8u) != 0u) {
-        ao = ao * textureSample(ao_tex, linear_sampler, in.uv).r;
+        ao = ao * textureSample(ao_tex, linear_sampler, input.uv).r;
     }
 
     // Normal mapping
-    var N = normalize(in.normal);
+    var N = normalize(input.normal);
     if ((uMaterial.flags & 4u) != 0u) {
-        let nmap = textureSample(normal_tex, linear_sampler, in.uv).rgb;
-        N = apply_normal_map(nmap, N, in.tangent);
+        let nmap = textureSample(normal_tex, linear_sampler, input.uv).rgb;
+        N = apply_normal_map(nmap, N, input.tangent);
     }
 
     // View and light vectors
-    let V = normalize(uCamera.view_pos.xyz - in.world_pos);
+    let V = normalize(uCamera.view_pos.xyz - input.world_pos);
     let L = normalize(-uLight.direction.xyz);
     let H = normalize(V + L);
 
