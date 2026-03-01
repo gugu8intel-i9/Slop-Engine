@@ -7,14 +7,14 @@
 //! - BindGroup caching
 //! - Minimal allocations and low CPU/GPU overhead
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use parking_lot::{RwLock, Mutex};
-use wgpu::util::DeviceExt;
+use anyhow::Result;
 use bytemuck::{Pod, Zeroable};
 use lru::LruCache;
+use parking_lot::{Mutex, RwLock};
+use std::collections::HashMap;
+use std::sync::Arc;
+use wgpu::util::DeviceExt;
 use xxhash_rust::xxh3::xxh3_64;
-use anyhow::Result;
 
 // ---------- Config ----------
 pub struct ResourceConfig {
@@ -42,10 +42,18 @@ impl Handle {
         let v = (index & 0x00FF_FFFF) | ((gen as u32) << 24);
         Handle(v)
     }
-    fn index(self) -> usize { (self.0 & 0x00FF_FFFF) as usize }
-    fn gen(self) -> u8 { ((self.0 >> 24) & 0xFF) as u8 }
-    pub fn invalid() -> Self { Handle(u32::MAX) }
-    pub fn is_valid(self) -> bool { self.0 != u32::MAX }
+    fn index(self) -> usize {
+        (self.0 & 0x00FF_FFFF) as usize
+    }
+    fn gen(self) -> u8 {
+        ((self.0 >> 24) & 0xFF) as u8
+    }
+    pub fn invalid() -> Self {
+        Handle(u32::MAX)
+    }
+    pub fn is_valid(self) -> bool {
+        self.0 != u32::MAX
+    }
 }
 
 // ---------- Internal resource records ----------
@@ -131,13 +139,9 @@ pub struct ResourceManager {
 
 impl ResourceManager {
     pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, cfg: ResourceConfig) -> Self {
-        // create dummy 1x1 white texture
-        let dummy_tex = Self::create_dummy_texture(&device, &queue);
+        let lru = LruCache::new(1024);
 
-        let mut lru = LruCache::new(1024);
-        // insert dummy into LRU later after slab created
-
-        let rm = Self {
+        let mut rm = Self {
             device,
             queue,
             cfg,
@@ -153,32 +157,35 @@ impl ResourceManager {
             bind_group_cache: Mutex::new(LruCache::new(cfg.max_bind_group_cache)),
             upload_queue: Mutex::new(Vec::new()),
             staging_pool: Mutex::new(Vec::new()),
-            dummy_texture: dummy_tex,
+            dummy_texture: Handle::invalid(),
         };
 
         // register dummy texture into slab
-        let _ = rm.register_dummy_in_slab();
+        rm.dummy_texture = rm.register_dummy_in_slab();
         rm
     }
 
     // ---------- Public API ----------
 
     /// Load texture bytes. Returns a handle immediately. Upload is queued and processed on tick().
-    pub fn load_texture_from_bytes(&self, bytes: &[u8], width: u32, height: u32, format: wgpu::TextureFormat) -> Handle {
+    pub fn load_texture_from_bytes(
+        &self,
+        bytes: &[u8],
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> Handle {
         // compute hash for dedupe
         let hash = xxh3_64(bytes);
 
         // fast path: existing texture
         if let Some(&idx) = self.texture_hash_map.read().get(&hash) {
             // bump refcount and LRU
-            if let Some(mut slab) = self.texture_slab.try_write() {
-                if let Some(rec) = slab.get_mut(idx) {
-                    if let Some(tr) = rec {
-                        tr.refcount = tr.refcount.saturating_add(1);
-                        self.texture_lru.lock().put(idx, ());
-                        return Handle::new(idx as u32, tr.generation);
-                    }
-                }
+            let mut slab = self.texture_slab.write();
+            if let Some(Some(tr)) = slab.get_mut(idx) {
+                tr.refcount = tr.refcount.saturating_add(1);
+                self.texture_lru.lock().put(idx, ());
+                return Handle::new(idx as u32, tr.generation);
             }
         }
 
@@ -212,7 +219,9 @@ impl ResourceManager {
             let mut gens = self.texture_gens.write();
             let gen = gens[idx];
             // create placeholder texture view using dummy texture view to keep bind groups stable
-            let dummy = self.get_texture_record(self.dummy_texture).expect("dummy present");
+            let dummy = self
+                .get_texture_record(self.dummy_texture)
+                .expect("dummy present");
             let rec = TextureRecord {
                 view: dummy.view.clone(),
                 sampler: dummy.sampler.clone(),
@@ -241,11 +250,18 @@ impl ResourceManager {
     }
 
     /// Get texture view and sampler for rendering. Updates LRU.
-    pub fn get_texture_view_sampler(&self, h: Handle) -> Option<(wgpu::TextureView, wgpu::Sampler)> {
-        if !h.is_valid() { return None; }
+    pub fn get_texture_view_sampler(
+        &self,
+        h: Handle,
+    ) -> Option<(wgpu::TextureView, wgpu::Sampler)> {
+        if !h.is_valid() {
+            return None;
+        }
         let idx = h.index();
         let slab = self.texture_slab.read();
-        if idx >= slab.len() { return None; }
+        if idx >= slab.len() {
+            return None;
+        }
         if let Some(rec) = &slab[idx] {
             // update LRU
             self.texture_lru.lock().put(idx, ());
@@ -256,33 +272,67 @@ impl ResourceManager {
     }
 
     /// Load mesh synchronously: creates GPU buffers immediately.
-    pub fn load_mesh(&self, vertices: &[u8], indices: &[u8], vertex_stride: u64, index_format: wgpu::IndexFormat) -> Result<Handle> {
+    pub fn load_mesh(
+        &self,
+        vertices: &[u8],
+        indices: &[u8],
+        vertex_stride: u64,
+        index_format: wgpu::IndexFormat,
+    ) -> Result<Handle> {
+        if vertex_stride == 0 {
+            anyhow::bail!("vertex_stride must be > 0");
+        }
+        if (vertices.len() as u64) % vertex_stride != 0 {
+            anyhow::bail!("vertex buffer length must be divisible by vertex_stride");
+        }
+
+        let index_stride = match index_format {
+            wgpu::IndexFormat::Uint16 => 2usize,
+            wgpu::IndexFormat::Uint32 => 4usize,
+        };
+        if !indices.len().is_multiple_of(index_stride) {
+            anyhow::bail!("index buffer length is not aligned with index format");
+        }
+
         // allocate slot
         let idx = {
             let mut slab = self.mesh_slab.write();
             let mut gens = self.mesh_gens.write();
             let mut slot = None;
             for (i, s) in slab.iter().enumerate() {
-                if s.is_none() { slot = Some(i); break; }
+                if s.is_none() {
+                    slot = Some(i);
+                    break;
+                }
             }
-            let index = if let Some(i) = slot { i } else { slab.push(None); gens.push(0u8); slab.len() - 1 };
+            let index = if let Some(i) = slot {
+                i
+            } else {
+                slab.push(None);
+                gens.push(0u8);
+                slab.len() - 1
+            };
             gens[index] = gens[index].wrapping_add(1);
             index
         };
 
         // create buffers
-        let vb = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mesh_vb"),
-            contents: vertices,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
-        let ib = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mesh_ib"),
-            contents: indices,
-            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-        });
+        let vb = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("mesh_vb"),
+                contents: vertices,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            });
+        let ib = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("mesh_ib"),
+                contents: indices,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            });
 
-        let index_count = (indices.len() / match index_format { wgpu::IndexFormat::Uint16 => 2, wgpu::IndexFormat::Uint32 => 4 }) as u32;
+        let index_count = (indices.len() / index_stride) as u32;
 
         let rec = MeshRecord {
             vertex_buffer: vb,
@@ -297,25 +347,43 @@ impl ResourceManager {
     }
 
     /// Create material record (params buffer + store texture handles). BindGroup created lazily and cached.
-    pub fn create_material(&self, params_bytes: &[u8], base: Option<Handle>, mr: Option<Handle>, normal: Option<Handle>, ao: Option<Handle>) -> Result<Handle> {
+    pub fn create_material(
+        &self,
+        params_bytes: &[u8],
+        base: Option<Handle>,
+        mr: Option<Handle>,
+        normal: Option<Handle>,
+        ao: Option<Handle>,
+    ) -> Result<Handle> {
         // allocate slot
         let idx = {
             let mut slab = self.material_slab.write();
             let mut gens = self.material_gens.write();
             let mut slot = None;
             for (i, s) in slab.iter().enumerate() {
-                if s.is_none() { slot = Some(i); break; }
+                if s.is_none() {
+                    slot = Some(i);
+                    break;
+                }
             }
-            let index = if let Some(i) = slot { i } else { slab.push(None); gens.push(0u8); slab.len() - 1 };
+            let index = if let Some(i) = slot {
+                i
+            } else {
+                slab.push(None);
+                gens.push(0u8);
+                slab.len() - 1
+            };
             gens[index] = gens[index].wrapping_add(1);
             index
         };
 
-        let params_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("material_params"),
-            contents: params_bytes,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let params_buf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("material_params"),
+                contents: params_bytes,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
 
         let rec = MaterialRecord {
             params_buffer: params_buf,
@@ -332,9 +400,19 @@ impl ResourceManager {
     }
 
     /// Get or create bind group for a material and pipeline id. Pipeline id is user-defined stable id for pipeline layout.
-    pub fn get_bind_group_for_material(&self, material: Handle, pipeline_layout: &wgpu::BindGroupLayout, pipeline_id: u64) -> Option<wgpu::BindGroup> {
-        if !material.is_valid() { return None; }
-        let key = BindGroupKey { material_handle: material.0, pipeline_id };
+    pub fn get_bind_group_for_material(
+        &self,
+        material: Handle,
+        pipeline_layout: &wgpu::BindGroupLayout,
+        pipeline_id: u64,
+    ) -> Option<wgpu::BindGroup> {
+        if !material.is_valid() {
+            return None;
+        }
+        let key = BindGroupKey {
+            material_handle: material.0,
+            pipeline_id,
+        };
         // check cache
         if let Some(bg) = self.bind_group_cache.lock().get(&key) {
             return Some(bg.clone());
@@ -343,30 +421,66 @@ impl ResourceManager {
         // build bind group entries from material record
         let midx = material.index();
         let mat_slab = self.material_slab.read();
-        if midx >= mat_slab.len() { return None; }
+        if midx >= mat_slab.len() {
+            return None;
+        }
         let mat_rec = mat_slab[midx].as_ref()?;
         // resolve textures (use dummy if missing)
-        let (base_view, base_sampler) = mat_rec.base_tex.and_then(|h| self.get_texture_view_sampler(h)).unwrap_or_else(|| {
-            self.get_texture_view_sampler(self.dummy_texture).expect("dummy present")
-        });
-        let (mr_view, _) = mat_rec.mr_tex.and_then(|h| self.get_texture_view_sampler(h)).unwrap_or_else(|| {
-            self.get_texture_view_sampler(self.dummy_texture).expect("dummy present")
-        });
-        let (normal_view, _) = mat_rec.normal_tex.and_then(|h| self.get_texture_view_sampler(h)).unwrap_or_else(|| {
-            self.get_texture_view_sampler(self.dummy_texture).expect("dummy present")
-        });
-        let (ao_view, _) = mat_rec.ao_tex.and_then(|h| self.get_texture_view_sampler(h)).unwrap_or_else(|| {
-            self.get_texture_view_sampler(self.dummy_texture).expect("dummy present")
-        });
+        let (base_view, base_sampler) = mat_rec
+            .base_tex
+            .and_then(|h| self.get_texture_view_sampler(h))
+            .unwrap_or_else(|| {
+                self.get_texture_view_sampler(self.dummy_texture)
+                    .expect("dummy present")
+            });
+        let (mr_view, _) = mat_rec
+            .mr_tex
+            .and_then(|h| self.get_texture_view_sampler(h))
+            .unwrap_or_else(|| {
+                self.get_texture_view_sampler(self.dummy_texture)
+                    .expect("dummy present")
+            });
+        let (normal_view, _) = mat_rec
+            .normal_tex
+            .and_then(|h| self.get_texture_view_sampler(h))
+            .unwrap_or_else(|| {
+                self.get_texture_view_sampler(self.dummy_texture)
+                    .expect("dummy present")
+            });
+        let (ao_view, _) = mat_rec
+            .ao_tex
+            .and_then(|h| self.get_texture_view_sampler(h))
+            .unwrap_or_else(|| {
+                self.get_texture_view_sampler(self.dummy_texture)
+                    .expect("dummy present")
+            });
 
         // create bind group
         let entries = &[
-            wgpu::BindGroupEntry { binding: 0, resource: mat_rec.params_buffer.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&base_view) },
-            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&mr_view) },
-            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&normal_view) },
-            wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&ao_view) },
-            wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&base_sampler) },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: mat_rec.params_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&base_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&mr_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&normal_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(&ao_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::Sampler(&base_sampler),
+            },
         ];
 
         let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -381,7 +495,9 @@ impl ResourceManager {
 
     /// Release a handle (decrement refcount). Actual free happens in tick() GC.
     pub fn release(&self, h: Handle) {
-        if !h.is_valid() { return; }
+        if !h.is_valid() {
+            return;
+        }
         // try textures
         {
             let mut slab = self.texture_slab.write();
@@ -429,7 +545,13 @@ impl ResourceManager {
         }
         for task in tasks {
             match task {
-                UploadTask::Texture { handle_index, bytes, width, height, format } => {
+                UploadTask::Texture {
+                    handle_index,
+                    bytes,
+                    width,
+                    height,
+                    format,
+                } => {
                     // decode bytes if necessary (assume bytes are raw RGBA8 if format provided)
                     // For generality, try to decode via image crate if bytes are encoded
                     let rgba: Vec<u8>;
@@ -439,11 +561,26 @@ impl ResourceManager {
                         rgba = img.into_vec();
                     } else {
                         // assume bytes are already RGBA8
+                        let expected = (w as usize).saturating_mul(h as usize).saturating_mul(4);
+                        if bytes.len() != expected {
+                            log::warn!(
+                                "Skipping texture upload: raw byte length {} does not match expected RGBA8 size {} for {}x{}",
+                                bytes.len(),
+                                expected,
+                                w,
+                                h
+                            );
+                            continue;
+                        }
                         rgba = bytes;
                     }
 
                     // create texture
-                    let size = wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 };
+                    let size = wgpu::Extent3d {
+                        width: w,
+                        height: h,
+                        depth_or_array_layers: 1,
+                    };
                     let tex = self.device.create_texture(&wgpu::TextureDescriptor {
                         label: Some("uploaded_texture"),
                         size,
@@ -457,9 +594,18 @@ impl ResourceManager {
 
                     // write texture
                     self.queue.write_texture(
-                        wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                        wgpu::ImageCopyTexture {
+                            texture: &tex,
+                            mip_level: 0,
+                            origin: wgpu::Origin3d::ZERO,
+                            aspect: wgpu::TextureAspect::All,
+                        },
                         &rgba,
-                        wgpu::ImageDataLayout { offset: 0, bytes_per_row: std::num::NonZeroU32::new(4 * w), rows_per_image: std::num::NonZeroU32::new(h) },
+                        wgpu::ImageDataLayout {
+                            offset: 0,
+                            bytes_per_row: std::num::NonZeroU32::new(4 * w),
+                            rows_per_image: std::num::NonZeroU32::new(h),
+                        },
                         size,
                     );
 
@@ -487,7 +633,8 @@ impl ResourceManager {
                                 rec.size_bytes = size_bytes;
                                 // update LRU and total bytes
                                 self.texture_lru.lock().put(handle_index, ());
-                                *self.current_texture_bytes.lock() += size_bytes;
+                                let mut current_bytes = self.current_texture_bytes.lock();
+                                *current_bytes = current_bytes.saturating_add(size_bytes);
                             }
                         }
                     }
@@ -548,15 +695,21 @@ impl ResourceManager {
         }
 
         // 4) Trim bind group cache
-        self.bind_group_cache.lock().resize(self.cfg.max_bind_group_cache);
+        self.bind_group_cache
+            .lock()
+            .resize(self.cfg.max_bind_group_cache);
     }
 
     // ---------- Helpers ----------
 
-    fn create_dummy_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> Handle {
+    fn create_dummy_record(device: &wgpu::Device, queue: &wgpu::Queue) -> TextureRecord {
         // 1x1 white RGBA8
         let rgba = [255u8, 255u8, 255u8, 255u8];
-        let size = wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 };
+        let size = wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        };
         let tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("rm_dummy"),
             size,
@@ -568,31 +721,43 @@ impl ResourceManager {
             view_formats: &[],
         });
         queue.write_texture(
-            wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::ImageCopyTexture {
+                texture: &tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
             &rgba,
-            wgpu::ImageDataLayout { offset: 0, bytes_per_row: std::num::NonZeroU32::new(4), rows_per_image: std::num::NonZeroU32::new(1) },
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: std::num::NonZeroU32::new(4),
+                rows_per_image: std::num::NonZeroU32::new(1),
+            },
             size,
         );
         let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
 
-        // register into slab
-        let idx = {
-            let mut slab = selfless_vec();
-            // we cannot access self here; return a temporary handle index 0 and let caller register
-            0usize
-        };
-
-        // For simplicity in constructor we will register dummy later; here return invalid handle
-        Handle::invalid()
+        TextureRecord {
+            view,
+            sampler,
+            size_bytes: 4,
+            refcount: 1,
+            generation: 1,
+            hash: 0,
+        }
     }
 
     // helper to get texture record by handle
     fn get_texture_record(&self, h: Handle) -> Option<TextureRecord> {
-        if !h.is_valid() { return None; }
+        if !h.is_valid() {
+            return None;
+        }
         let idx = h.index();
         let slab = self.texture_slab.read();
-        if idx >= slab.len() { return None; }
+        if idx >= slab.len() {
+            return None;
+        }
         slab[idx].as_ref().map(|r| TextureRecord {
             view: r.view.clone(),
             sampler: r.sampler.clone(),
@@ -605,39 +770,19 @@ impl ResourceManager {
 
     // register dummy into slab after creation (called in new)
     fn register_dummy_in_slab(&self) -> Handle {
-        // create 1x1 white texture again but using device/queue
-        let rgba = [255u8, 255u8, 255u8, 255u8];
-        let size = wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 };
-        let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("rm_dummy"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        self.queue.write_texture(
-            wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            &rgba,
-            wgpu::ImageDataLayout { offset: 0, bytes_per_row: std::num::NonZeroU32::new(4), rows_per_image: std::num::NonZeroU32::new(1) },
-            size,
-        );
-        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor::default());
+        let dummy = Self::create_dummy_record(&self.device, &self.queue);
 
         // allocate slot
         let idx = {
             let mut slab = self.texture_slab.write();
             let mut gens = self.texture_gens.write();
             slab.push(Some(TextureRecord {
-                view: view.clone(),
-                sampler: sampler.clone(),
-                size_bytes: 4,
-                refcount: 1,
-                generation: 1,
-                hash: 0,
+                view: dummy.view.clone(),
+                sampler: dummy.sampler.clone(),
+                size_bytes: dummy.size_bytes,
+                refcount: dummy.refcount,
+                generation: dummy.generation,
+                hash: dummy.hash,
             }));
             gens.push(1u8);
             slab.len() - 1
