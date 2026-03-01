@@ -1,98 +1,126 @@
-// main.js - Slop Engine bootstrap (improved, robust, and compatible)
-// - Initializes the wasm package with an explicit .wasm path
-// - Verifies WebGPU support early
-// - Finds the canvas (#slop-canvas), resizes it for DPR, and keeps it responsive
-// - Calls exported `run` with the canvas if the function accepts an argument, otherwise calls it with no args
-// - Adds basic error handling and helpful console messages
+// main.js - Slop Engine bootstrap
+// - Initializes WASM with an explicit .wasm path for reliable hosting
+// - Adds graceful fallback when WebGPU is unavailable
+// - Resizes canvas for DPR with compatibility fallback when ResizeObserver isn't present
+// - Calls exported `run` with or without canvas argument to support multiple bindings
 
 import init, { run } from './pkg/slop_engine.js';
+
+function createStatusOverlay(message) {
+  const overlay = document.createElement('div');
+  overlay.setAttribute('role', 'status');
+  overlay.style.cssText = [
+    'position:fixed',
+    'inset:0',
+    'display:flex',
+    'align-items:center',
+    'justify-content:center',
+    'background:#000',
+    'color:#fff',
+    'font:16px system-ui,sans-serif',
+    'padding:1.25rem',
+    'text-align:center',
+    'z-index:9999'
+  ].join(';');
+  overlay.textContent = message;
+  document.body.appendChild(overlay);
+  return overlay;
+}
 
 function resizeCanvasToDisplaySize(canvas) {
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   const width = Math.floor(canvas.clientWidth * dpr);
   const height = Math.floor(canvas.clientHeight * dpr);
+
   if (canvas.width !== width || canvas.height !== height) {
     canvas.width = width;
     canvas.height = height;
     return true;
   }
+
   return false;
 }
 
+function setupCanvasResize(canvas) {
+  resizeCanvasToDisplaySize(canvas);
+
+  const resize = () => resizeCanvasToDisplaySize(canvas);
+  window.addEventListener('resize', resize, { passive: true });
+
+  let observer = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+  }
+
+  let dprMedia = null;
+  const onDprChange = () => {
+    resize();
+    if (dprMedia && typeof dprMedia.removeEventListener === 'function') {
+      dprMedia.removeEventListener('change', onDprChange);
+    }
+
+    dprMedia = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    if (dprMedia && typeof dprMedia.addEventListener === 'function') {
+      dprMedia.addEventListener('change', onDprChange, { passive: true });
+    }
+  };
+
+  onDprChange();
+
+  return () => {
+    window.removeEventListener('resize', resize);
+    if (observer) observer.disconnect();
+    if (dprMedia && typeof dprMedia.removeEventListener === 'function') {
+      dprMedia.removeEventListener('change', onDprChange);
+    }
+  };
+}
+
 async function bootstrap() {
+  let overlay = null;
+
   try {
-    // 1) Check WebGPU support early
+    const canvas = document.getElementById('slop-canvas');
+
+    if (!canvas) {
+      throw new Error('No canvas with id "slop-canvas" found in DOM.');
+    }
+
     if (!('gpu' in navigator)) {
-      console.error('Slop Engine Error: WebGPU not supported in this browser.');
-      document.body.innerHTML = '<h1 style="color:#fff;background:#000;padding:2rem;text-align:center">Please use a browser that supports WebGPU.</h1>';
+      overlay = createStatusOverlay('WebGPU is not available in this browser. Update your browser or enable the WebGPU feature flag.');
       return;
     }
 
-    // 2) Locate canvas (must match index.html)
-    const canvas = document.getElementById('slop-canvas');
-    if (!canvas) {
-      console.warn('No canvas with id "slop-canvas" found — falling back to document body.');
-    }
-
-    // 3) Initialize wasm module with explicit path to the .wasm file
-    //    This helps wasm-pack locate the binary reliably in many hosting setups.
     await init('./pkg/slop_engine_bg.wasm');
-    console.log('Slop Engine: wasm module initialized.');
+    const cleanupResize = setupCanvasResize(canvas);
 
-    // 4) Ensure canvas is sized correctly before handing control to wasm
-    if (canvas) {
-      // initial resize
-      resizeCanvasToDisplaySize(canvas);
-
-      // keep canvas sized on window resize and DPR changes
-      let resizeObserver = new ResizeObserver(() => resizeCanvasToDisplaySize(canvas));
-      resizeObserver.observe(canvas);
-
-      // also handle orientation/zoom/devicePixelRatio changes
-      window.addEventListener('resize', () => resizeCanvasToDisplaySize(canvas));
-      window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener?.('change', () => resizeCanvasToDisplaySize(canvas));
-    }
-
-    // 5) Call the engine's run function.
-    //    If `run` accepts an argument (e.g., a canvas), pass it; otherwise call with no args.
-    //    This keeps compatibility with different Rust bindings.
     try {
-      if (typeof run === 'function') {
-        if (run.length >= 1 && canvas) {
-          // run expects at least one argument — pass the canvas element
-          await run(canvas);
-        } else {
-          // run expects no args or no canvas available
-          await run();
-        }
-      } else {
+      if (typeof run !== 'function') {
         throw new Error('`run` export not found in wasm package.');
       }
-    } catch (engineErr) {
-      console.error('Slop Engine runtime error:', engineErr);
-      // Optionally show a user-friendly message in the canvas area
-      if (canvas) {
-        const ctx = canvas.getContext?.('2d');
-        if (ctx) {
-          ctx.fillStyle = '#000';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.fillStyle = '#f55';
-          ctx.font = '16px sans-serif';
-          ctx.fillText('Slop Engine failed to start. See console for details.', 10, 30);
-        }
+
+      if (run.length >= 1) {
+        await run(canvas);
+      } else {
+        await run();
       }
+    } finally {
+      // Engine owns rendering loop; no longer need expensive observers/listeners.
+      cleanupResize();
     }
 
-    console.log('Slop Engine: bootstrap complete.');
+    if (overlay) overlay.remove();
   } catch (err) {
     console.error('Slop Engine failed to initialize:', err);
-    document.body.innerHTML = '<h1 style="color:#fff;background:#000;padding:2rem;text-align:center">Initialization error — check console.</h1>';
+
+    if (overlay) overlay.remove();
+    createStatusOverlay('Slop Engine initialization failed. Open developer tools for details.');
   }
 }
 
-// Start the engine when the page is ready
 if (document.readyState === 'loading') {
-  window.addEventListener('DOMContentLoaded', bootstrap);
+  window.addEventListener('DOMContentLoaded', bootstrap, { once: true });
 } else {
   bootstrap();
 }
