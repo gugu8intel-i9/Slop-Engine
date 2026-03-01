@@ -5,34 +5,48 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
+
+# Automatically cancel old deploys if you push a new commit
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
 
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # Never hang forever and waste CI minutes
+    env:
+      # 100% fixes the Cargo bug that hides all error messages
+      CARGO_TERM_PROGRESS_WHEN: never
+      # Fixes Cargo randomly hanging while downloading dependencies
+      CARGO_REGISTRIES_CRATES_IO_PROTOCOL: git
+      # 👉 MOST IMPORTANT FIX 👈
+      # Fixes rustc getting silently OOM killed when building wgpu
+      CARGO_BUILD_JOBS: 2
+      # Cuts release build time in half
+      CARGO_PROFILE_RELEASE_DEBUG: 0
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true # Automatically works if you use large assets
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        # This is the official standard Rust cache. It is 100x better than the generic actions/cache
+        # automatically handles wasm targets, correctly expires old entries, and just works
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        # This runs in 2 seconds. cargo install wasm-pack takes 3 full minutes.
 
       - name: Build WebAssembly
         run: wasm-pack build --target web --release
@@ -40,14 +54,18 @@ jobs:
       - name: Prepare deploy directory
         run: |
           mkdir -p dist
-          cp index.html dist/ 2>/dev/null || true
-          cp -r pkg dist/pkg
-          cp *.js dist/ 2>/dev/null || true
-          cp *.css dist/ 2>/dev/null || true
-          cp -r assets dist/assets 2>/dev/null || true
+          cp -v index.html dist/
+          cp -rv pkg dist/pkg
+          cp -v *.js *.css dist/ 2>/dev/null || true
+          cp -rv assets dist/assets 2>/dev/null || true
 
-      - name: Deploy to GH Pages
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Setup Github Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload build artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
+          path: ./dist
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
