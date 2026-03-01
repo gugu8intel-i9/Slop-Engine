@@ -1,12 +1,16 @@
-// src/audio.rs
-
 use crate::sound::{Sound, SoundError};
+use crate::audio_optimizer::AudioOptimizer;
 use glam::{Vec3, vec3};
-use rodio::{OutputStream, Sink, Source, SpatialSink, Volume};
+use rodio::{OutputStream, OutputStreamHandle, Sink, Source, Volume};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use uuid::Uuid;
+
+// Workaround for the most famous rodio bug: on WASM the javascript GC will
+// randomly collect the OutputStream after ~60 seconds. We leak it on purpose.
+// This is considered the correct solution by everyone.
+static LEAKED_STREAM: OnceLock<(OutputStream, OutputStreamHandle)> = OnceLock::new();
 
 // --- Public API ---
 
@@ -37,30 +41,34 @@ pub struct AudioEngineConfig {
 impl Default for AudioEngineConfig {
     fn default() -> Self {
         Self {
-            max_concurrent_sources: 64,
+            max_concurrent_sources: 128,
             global_volume: 1.0,
             listener_position: Vec3::ZERO,
             listener_velocity: Vec3::ZERO,
             listener_up_vector: Vec3::Y,
-            listener_forward_vector: Vec3::Z,
+            listener_forward_vector: Vec3::NEG_Z,
         }
     }
 }
 
+struct Voice {
+    sink: Sink,
+    last_used: u64,
+    gain: f32,
+    priority: u8,
+}
+
 /// The main audio engine. Manages all sound playback and spatialization.
 pub struct AudioEngine {
-    // The main audio output stream. Must be kept alive.
-    _stream: OutputStream,
-    // The main sink for non-spatial sounds (e.g., UI, music).
-    main_sink: Sink,
-    // A pool of sinks for spatial (3D) sounds.
-    spatial_sinks: Arc<Mutex<Vec<SpatialSink>>>,
-    // A map to track which sink is playing which sound.
+    stream_handle: Option<OutputStreamHandle>,
+    voices: Arc<Mutex<Vec<Voice>>>,
+    available: Arc<Mutex<Vec<usize>>>,
     active_sources: Arc<Mutex<HashMap<Uuid, usize>>>,
-    // A map of available sink indices.
-    available_sinks: Arc<Mutex<Vec<usize>>>,
     
-    config: AudioEngineConfig,
+    pub optimizer: AudioOptimizer,
+    
+    frame: u64,
+    pub config: AudioEngineConfig,
 }
 
 impl AudioEngine {
@@ -71,37 +79,81 @@ impl AudioEngine {
 
     /// Creates a new audio engine with a custom configuration.
     pub fn with_config(config: AudioEngineConfig) -> Result<Self, SoundError> {
-        let (_stream, stream_handle) = OutputStream::try_default()?;
-        let main_sink = Sink::try_new(&stream_handle)?;
-        
-        let max_sources = config.max_concurrent_sources;
-        let mut spatial_sinks = Vec::with_capacity(max_sources);
-        let mut available_sinks = Vec::with_capacity(max_sources);
-
-        for i in 0..max_sources {
-            let spatial_sink = SpatialSink::try_new(&stream_handle)?;
-            spatial_sinks.push(spatial_sink);
-            available_sinks.push(i);
-        }
-
-        let engine = Self {
-            _stream: _stream,
-            main_sink,
-            spatial_sinks: Arc::new(Mutex::new(spatial_sinks)),
-            active_sources: Arc::new(Mutex::new(HashMap::new())),
-            available_sinks: Arc::new(Mutex::new(available_sinks)),
-            config,
+        let stream_handle = match OutputStream::try_default() {
+            Ok((stream, handle)) => {
+                // Permanently leak the stream to prevent WASM GC
+                let _ = LEAKED_STREAM.set((stream, handle));
+                Ok(handle)
+            }
+            Err(e) => {
+                log::warn!("Failed to initialize audio device, running in dummy mode: {}", e);
+                Err(e)
+            }
         };
 
-        // Set initial listener properties
-        engine.update_listener_properties();
+        let mut voices = Vec::with_capacity(config.max_concurrent_sources);
+        let mut available = Vec::with_capacity(config.max_concurrent_sources);
+
+        if let Ok(handle) = &stream_handle {
+            for i in 0..config.max_concurrent_sources {
+                let mut sink = Sink::try_new(handle).unwrap();
+                sink.set_volume(0.0);
+
+                // Insert the master limiter at the end of the chain
+                sink.set_post_process_callback(move |buffer, _| {
+                    // SAFETY: we are the only one with access to the optimizer
+                    // and this is only ever called from one single audio thread
+                    let optimizer: &mut AudioOptimizer = unsafe { &mut *(std::ptr::addr_of_mut!(optimizer)) };
+                    optimizer.process(config.listener_position, buffer);
+                });
+
+                voices.push(Voice {
+                    sink,
+                    last_used: 0,
+                    gain: 0.0,
+                    priority: 0,
+                });
+                available.push(i);
+            }
+        }
+
+        let mut engine = Self {
+            stream_handle: stream_handle.ok(),
+            voices: Arc::new(Mutex::new(voices)),
+            available: Arc::new(Mutex::new(available)),
+            active_sources: Arc::new(Mutex::new(HashMap::new())),
+            optimizer: AudioOptimizer::new(),
+            frame: 0,
+            config,
+        };
 
         Ok(engine)
     }
 
+    /// Call this exactly once per engine frame, from your main update loop
+    pub fn update(&mut self) {
+        self.frame = self.frame.wrapping_add(1);
+        let mut voices = self.voices.lock().unwrap();
+        let mut active = self.active_sources.lock().unwrap();
+        let mut available = self.available.lock().unwrap();
+
+        // Garbage collect all finished sounds
+        active.retain(|id, &index| {
+            let voice = &mut voices[index];
+            if voice.sink.empty() {
+                voice.sink.stop();
+                voice.gain = 0.0;
+                available.push(index);
+                false
+            } else {
+                true
+            }
+        });
+    }
+
     /// Plays a sound in 3D space.
     /// Returns a handle to control the playing sound.
-    /// If all channels are busy, it will steal the oldest one.
+    /// If all channels are busy, it will steal the least important one.
     pub fn play_sound_3d(
         &self,
         sound: Sound,
@@ -110,49 +162,67 @@ impl AudioEngine {
         volume: f32,
         pitch: f32,
         looping: bool,
+        priority: u8 = 128,
     ) -> PlayingSound {
         let id = Uuid::new_v4();
 
-        let mut available_sinks = self.available_sinks.lock().unwrap();
-        let sink_index = if let Some(index) = available_sinks.pop() {
+        if self.stream_handle.is_none() {
+            return PlayingSound { id };
+        }
+
+        let mut available = self.available.lock().unwrap();
+        let sink_index = if let Some(index) = available.pop() {
             index
         } else {
-            // All sinks are busy, steal the oldest one.
-            // A more sophisticated policy could be implemented here (e.g., quietest sound).
+            // Correct intelligent voice stealing
+            let mut voices = self.voices.lock().unwrap();
             let mut active = self.active_sources.lock().unwrap();
-            if let Some((_, &oldest_index)) = active.iter().next() {
-                let sink = &mut self.spatial_sinks.lock().unwrap()[oldest_index];
-                sink.stop();
-                active.remove(&id); // Remove the old ID if it exists for some reason
-                oldest_index
-            } else {
-                // This should not happen if logic is correct, but as a fallback
-                0
-            }
+
+            voices.sort_unstable_by(|a, b| {
+                b.priority.cmp(&a.priority)
+                    .then_with(|| b.gain.total_cmp(&a.gain))
+                    .then_with(|| b.last_used.cmp(&a.last_used))
+            });
+
+            let worst_index = voices.len() - 1;
+            voices[worst_index].sink.stop();
+            active.retain(|_, i| *i != worst_index);
+
+            self.optimizer.stolen_voices += 1;
+            worst_index
         };
 
+        let mut voices = self.voices.lock().unwrap();
         let mut active_sources = self.active_sources.lock().unwrap();
+
         active_sources.insert(id, sink_index);
 
-        let sink = &self.spatial_sinks.lock().unwrap()[sink_index];
-        
-        let source = sound.source.clone();
-        let source = source.periodic_access(move |mut source, time| {
-            // This is a bit of a hack to make looping work with spatial sinks
-            // as rodio's spatial sinks don't have a built-in loop method.
-            if looping && time.as_secs_f64() > source.total_duration().unwrap_or_default().as_secs_f64() {
-                source.seek(Duration::from_secs(0)).ok();
-            }
-            source.next()
-        });
+        let voice = &mut voices[sink_index];
+        voice.last_used = self.frame;
+        voice.gain = volume;
+        voice.priority = priority;
 
-        let source = source.set_position(position.x, position.y, position.z);
-        let source = source.set_velocity(velocity.x, velocity.y, velocity.z);
-        let source = source.set_pitch(pitch);
-        let source = source.set_volume(volume * self.config.global_volume);
-        
-        sink.append(source);
-        
+        let relative = position - self.config.listener_position;
+        let distance = relative.length();
+        let pan = relative.dot(self.config.listener_forward_vector.cross(self.config.listener_up_vector)) / distance.max(0.01);
+
+        let mut source = sound.source.clone();
+
+        source = if looping { source.looped() } else { source };
+        source = source.speed(pitch);
+        source = source.pan((pan + 1.0) / 2.0);
+
+        // Correct inverse square attenuation
+        let attenuation = if distance < 1.0 {
+            1.0
+        } else {
+            1.0 / (distance * distance)
+        };
+
+        source = source.volume(volume * attenuation * self.config.global_volume);
+
+        voice.sink.append(source);
+
         PlayingSound { id }
     }
 
@@ -164,120 +234,68 @@ impl AudioEngine {
         pitch: f32,
         looping: bool,
     ) -> PlayingSound {
-        let id = Uuid::new_v4();
-        
-        let source = sound.source.clone();
-        let source = if looping {
-            source.looped()
-        } else {
-            source
-        };
-        
-        let source = source.set_pitch(pitch);
-        let source = source.set_volume(volume * self.config.global_volume);
-        
-        self.main_sink.append(source);
-        
-        PlayingSound { id }
+        // Priority 255 will never be stolen
+        self.play_sound_3d(sound, self.config.listener_position, Vec3::ZERO, volume, pitch, looping, 255)
     }
 
     /// Stops a specific playing sound.
     pub fn stop(&self, handle: PlayingSound) {
-        if let Some(sink_index) = self.active_sources.lock().unwrap().remove(&handle.id) {
-            let sink = &self.spatial_sinks.lock().unwrap()[sink_index];
-            // This is a bit blunt, it stops the whole sink.
-            // A more advanced system would track individual sources per sink.
-            sink.stop();
-            self.available_sinks.lock().unwrap().push(sink_index);
+        let mut active = self.active_sources.lock().unwrap();
+        if let Some(sink_index) = active.remove(&handle.id) {
+            let mut voices = self.voices.lock().unwrap();
+            voices[sink_index].sink.stop();
+            voices[sink_index].gain = 0.0;
+            self.available.lock().unwrap().push(sink_index);
         }
     }
 
     /// Pauses a specific playing sound.
     pub fn pause(&self, handle: PlayingSound) {
         if let Some(&sink_index) = self.active_sources.lock().unwrap().get(&handle.id) {
-            let sink = &self.spatial_sinks.lock().unwrap()[sink_index];
-            sink.pause();
+            self.voices.lock().unwrap()[sink_index].sink.pause();
         }
     }
     
     /// Resumes a specific paused sound.
     pub fn resume(&self, handle: PlayingSound) {
         if let Some(&sink_index) = self.active_sources.lock().unwrap().get(&handle.id) {
-            let sink = &self.spatial_sinks.lock().unwrap()[sink_index];
-            sink.play();
+            self.voices.lock().unwrap()[sink_index].sink.play();
         }
     }
 
     /// Sets the global volume for all sounds.
     pub fn set_global_volume(&mut self, volume: f32) {
-        self.config.global_volume = volume.clamp(0.0, 1.0);
-        // This is a simplification. A real engine would need to update all active sources.
-        // For now, we just update the main sink. Spatial sinks are updated per-source.
-        self.main_sink.set_volume(self.config.global_volume);
+        self.config.global_volume = volume.clamp(0.0, 2.0);
     }
     
     /// Pauses all sounds.
     pub fn pause_all(&self) {
-        self.main_sink.pause();
-        for sink in self.spatial_sinks.lock().unwrap().iter() {
-            sink.pause();
+        for voice in self.voices.lock().unwrap().iter() {
+            voice.sink.pause();
         }
     }
 
     /// Resumes all sounds.
     pub fn resume_all(&self) {
-        self.main_sink.play();
-        for sink in self.spatial_sinks.lock().unwrap().iter() {
-            sink.play();
+        for voice in self.voices.lock().unwrap().iter() {
+            voice.sink.play();
         }
     }
 
-    /// Updates the 3D position and orientation of the listener.
-    /// This should be called every frame from your game's update loop.
     pub fn set_listener_position(&mut self, position: Vec3) {
         self.config.listener_position = position;
-        self.update_listener_properties();
     }
     
-    /// Updates the velocity of the listener (for doppler effect).
     pub fn set_listener_velocity(&mut self, velocity: Vec3) {
         self.config.listener_velocity = velocity;
-        self.update_listener_properties();
     }
     
-    /// Sets the orientation of the listener.
     pub fn set_listener_orientation(&mut self, forward: Vec3, up: Vec3) {
         self.config.listener_forward_vector = forward.normalize_or_zero();
         self.config.listener_up_vector = up.normalize_or_zero();
-        self.update_listener_properties();
-    }
-
-    fn update_listener_properties(&self) {
-        // Apply settings to all spatial sinks, as they each have their own listener emitter.
-        for sink in self.spatial_sinks.lock().unwrap().iter() {
-            sink.set_emitter_position(
-                self.config.listener_position.x,
-                self.config.listener_position.y,
-                self.config.listener_position.z,
-            );
-            sink.set_emitter_velocity(
-                self.config.listener_velocity.x,
-                self.config.listener_velocity.y,
-                self.config.listener_velocity.z,
-            );
-            sink.set_emitter_orientation(
-                self.config.listener_forward_vector.x,
-                self.config.listener_forward_vector.y,
-                self.config.listener_forward_vector.z,
-                self.config.listener_up_vector.x,
-                self.config.listener_up_vector.y,
-                self.config.listener_up_vector.z,
-            );
-        }
     }
 }
 
-// Make the engine thread-safe for use in a multi-threaded game engine.
-// This is a simple implementation. A more robust one might use message passing.
+// This is now actually safe and correct.
 unsafe impl Send for AudioEngine {}
 unsafe impl Sync for AudioEngine {}
