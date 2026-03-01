@@ -396,5 +396,5 @@ Slop Engine is built for developers who want **full control**, **maximum perform
    * If you wish to contribute, please be a sponsor, because these API costs are getting expensive
    
    * If any issue occurs, please put an issue out
-   
+---
 > Please note that this will not work, because it is pure AI slop
