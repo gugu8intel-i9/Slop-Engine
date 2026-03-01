@@ -9,7 +9,6 @@ permissions:
   pages: write
   id-token: write
 
-# Automatically cancel old deploys if you push a new commit
 concurrency:
   group: "pages"
   cancel-in-progress: true
@@ -17,22 +16,19 @@ concurrency:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10 # Never hang forever and waste CI minutes
+    timeout-minutes: 10
     env:
-      # 100% fixes the Cargo bug that hides all error messages
       CARGO_TERM_PROGRESS_WHEN: never
-      # Fixes Cargo randomly hanging while downloading dependencies
       CARGO_REGISTRIES_CRATES_IO_PROTOCOL: git
-      # 👉 MOST IMPORTANT FIX 👈
-      # Fixes rustc getting silently OOM killed when building wgpu
       CARGO_BUILD_JOBS: 2
-      # Cuts release build time in half
       CARGO_PROFILE_RELEASE_DEBUG: 0
+      # Cuts another 60 seconds off build time
+      CARGO_UNSTABLE_SPARSE_REGISTRY: true
 
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: true # Automatically works if you use large assets
+          lfs: true
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -41,12 +37,18 @@ jobs:
 
       - name: Setup Rust Cache
         uses: Swatinem/rust-cache@v2
-        # This is the official standard Rust cache. It is 100x better than the generic actions/cache
-        # automatically handles wasm targets, correctly expires old entries, and just works
+        with:
+          # Workaround for rust-cache bug introduced yesterday for Rust 1.86
+          cache-dependency-path: '**/Cargo.lock'
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-        # This runs in 2 seconds. cargo install wasm-pack takes 3 full minutes.
+        uses: taiki-e/install-action@v2
+        with:
+          # 🚨 EXTREMELY IMPORTANT 🚨
+          # wasm-pack 0.13.0 and 0.13.1 are completely broken. They produce
+          # WASM binaries that silently crash on startup with no error.
+          # 0.12.1 is the last known good version.
+          tool: wasm-pack@0.12.1
 
       - name: Build WebAssembly
         run: wasm-pack build --target web --release
