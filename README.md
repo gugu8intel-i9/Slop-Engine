@@ -112,7 +112,7 @@ A hyper‑optimized resource system designed for:
 - Zero‑downtime pipeline swapping
 
 ---
-### ⚖️Anticheat (Rust) — Behaviour, Network, Process & Memory Verification
+### ⚖️ Anticheat (Rust) — Behaviour, Network, Process & Memory Verification
 
 A Rust-based anti-cheat module designed to track player state, validate network packets, analyse behaviour, and (optionally) perform lightweight process and memory integrity checks on Windows.
 
