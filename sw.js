@@ -1,91 +1,123 @@
 // sw.js
-// Improved service worker for Slop Engine:
-// - versioned cache name
-// - install: pre-cache core assets and skip waiting
-// - activate: remove old caches and claim clients
-// - fetch: network-first for navigations (SPA friendly), cache-first for other GET assets,
-//   and dynamically cache successful GET responses (JS/WASM/PNG/etc.)
+// Service worker for Slop Engine with resilient caching:
+// - Versioned static cache + runtime cache
+// - Navigation network-first with offline fallback
+// - Stale-while-revalidate for local static assets
+// - Runtime caching for successful GET requests with bounded growth
 
-const CACHE_NAME = 'slop-cache-v1';
-const ASSETS = [
+const STATIC_CACHE = 'slop-static-v2';
+const RUNTIME_CACHE = 'slop-runtime-v2';
+const OFFLINE_FALLBACK = './index.html';
+const MAX_RUNTIME_ENTRIES = 80;
+
+const CORE_ASSETS = [
   './',
   './index.html',
+  './main.js',
+  './sw.js',
   './pkg/slop_engine.js',
   './pkg/slop_engine_bg.wasm'
 ];
 
 self.addEventListener('install', (event) => {
-  // Pre-cache core assets and activate immediately
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(ASSETS))
+    caches
+      .open(STATIC_CACHE)
+      .then((cache) => cache.addAll(CORE_ASSETS))
       .then(() => self.skipWaiting())
   );
 });
 
 self.addEventListener('activate', (event) => {
-  // Remove old caches and take control of clients immediately
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) return caches.delete(key);
-          return Promise.resolve();
-        })
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((key) => key !== STATIC_CACHE && key !== RUNTIME_CACHE)
+            .map((key) => caches.delete(key))
+        )
       )
-    ).then(() => self.clients.claim())
+      .then(() => self.clients.claim())
   );
 });
 
+async function limitRuntimeCache() {
+  const cache = await caches.open(RUNTIME_CACHE);
+  const keys = await cache.keys();
+  if (keys.length <= MAX_RUNTIME_ENTRIES) return;
+
+  const overflow = keys.length - MAX_RUNTIME_ENTRIES;
+  await Promise.all(keys.slice(0, overflow).map((request) => cache.delete(request)));
+}
+
+function isCacheable(request, response) {
+  if (!response) return false;
+  if (request.method !== 'GET') return false;
+  if (response.status !== 200) return false;
+  if (request.url.startsWith('chrome-extension://')) return false;
+  return response.type === 'basic' || response.type === 'cors';
+}
+
 self.addEventListener('fetch', (event) => {
-  const req = event.request;
+  const request = event.request;
+  const url = new URL(request.url);
 
-  // Only handle GET requests
-  if (req.method !== 'GET') return;
+  if (request.method !== 'GET') return;
 
-  // Navigation requests (SPA): try network first, fallback to cached index.html
-  if (req.mode === 'navigate') {
+  // Never intercept extension/devtools or websocket URLs.
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+
+  // Navigation: network-first, offline fallback to index.
+  if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(req)
-        .then((networkResponse) => {
-          // Optionally update the cached index.html for offline navigations
-          caches.open(CACHE_NAME).then((cache) => {
-            // store a copy keyed by '/index.html' so fallback works
-            cache.put('./index.html', networkResponse.clone()).catch(() => {});
-          });
-          return networkResponse;
+      fetch(request)
+        .then((response) => {
+          const responseClone = response.clone();
+          caches.open(STATIC_CACHE).then((cache) => cache.put(OFFLINE_FALLBACK, responseClone)).catch(() => {});
+          return response;
         })
-        .catch(() => caches.match('./index.html'))
+        .catch(async () => {
+          const cached = await caches.match(OFFLINE_FALLBACK);
+          return cached || Response.error();
+        })
     );
     return;
   }
 
-  // For other requests: try cache first, then network; if network succeeds, cache it.
+  // For first-party static files, use stale-while-revalidate.
+  const isLocalStatic = url.origin === self.location.origin;
+  if (isLocalStatic) {
+    event.respondWith(
+      caches.match(request).then(async (cached) => {
+        const networkPromise = fetch(request)
+          .then(async (response) => {
+            if (isCacheable(request, response)) {
+              const cache = await caches.open(STATIC_CACHE);
+              await cache.put(request, response.clone());
+            }
+            return response;
+          })
+          .catch(() => cached);
+
+        return cached || networkPromise;
+      })
+    );
+    return;
+  }
+
+  // For cross-origin GETs: runtime cache fallback.
   event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-
-      return fetch(req)
-        .then((networkResponse) => {
-          // Only cache successful, same-origin or CORS responses that are not opaque,
-          // but still allow opaque responses (e.g., CDN) to pass through without caching.
-          if (!networkResponse || networkResponse.status !== 200) {
-            return networkResponse;
-          }
-
-          // Clone and store a copy in the cache for future requests.
-          const responseClone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            // Use request URL as the cache key
-            cache.put(req, responseClone).catch(() => {});
-          });
-
-          return networkResponse;
-        })
-        .catch(() => {
-          // If fetch fails and nothing in cache, optionally return a fallback (could be an offline page)
-          return caches.match('./index.html');
-        });
-    })
+    fetch(request)
+      .then(async (response) => {
+        if (isCacheable(request, response)) {
+          const cache = await caches.open(RUNTIME_CACHE);
+          await cache.put(request, response.clone());
+          await limitRuntimeCache();
+        }
+        return response;
+      })
+      .catch(() => caches.match(request))
   );
 });

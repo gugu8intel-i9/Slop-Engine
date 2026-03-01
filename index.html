@@ -3,31 +3,46 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="dark light" />
   <title>Slop Engine</title>
   <style>
-    html,body { height:100%; margin:0; background:#000; }
-    #slop-container { width:100vw; height:100vh; overflow:hidden; display:flex; align-items:stretch; }
-    canvas#slop-canvas { width:100%; height:100%; display:block; }
-    /* keep pointer events for UI if you add overlays later */
+    html, body { height: 100%; margin: 0; background: #000; }
+    #slop-container { width: 100vw; height: 100vh; overflow: hidden; display: flex; align-items: stretch; }
+    canvas#slop-canvas { width: 100%; height: 100%; display: block; }
+    .fallback {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      background: #000;
+      font: 16px system-ui, sans-serif;
+      padding: 1.5rem;
+      text-align: center;
+    }
   </style>
+  <link rel="modulepreload" href="./main.js" />
 </head>
 <body>
+  <noscript>
+    <div class="fallback">Slop Engine requires JavaScript to run.</div>
+  </noscript>
+
   <div id="slop-container">
     <canvas id="slop-canvas" tabindex="0" aria-label="Slop Engine canvas"></canvas>
   </div>
 
-  <!-- Service worker registration (optional; safe if sw.js is present) -->
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch((err) => {
-        // registration failed — ignore in production or log for debugging
-        console.warn('SW registration failed:', err);
-      });
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch((err) => {
+          console.warn('SW registration failed:', err);
+        });
+      }, { once: true });
     }
   </script>
 
-  <!-- Main module: keep your existing main.js, which should import/init the wasm pkg.
-       Ensure main.js reads the canvas by id "slop-canvas" and calls the engine init. -->
   <script type="module" src="./main.js"></script>
 </body>
 </html>

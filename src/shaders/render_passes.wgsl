@@ -460,7 +460,7 @@ fn lighting_cs(@builtin(global_invocation_id) gid: vec3<u32>) {
     let F0 = mix(vec3(0.04), albedo, metallic);
     
     // Iterate lights in cluster (wave-level coherence)
-    for (var i = 0u; i < cluster.light_count; i++) {
+    for (var i: u32 = 0u; i < cluster.light_count; i = i + 1u) {
         let light_idx = uClusterLightIndices[cluster.light_offset + i];
         let light = uLights[light_idx];
         
@@ -611,11 +611,11 @@ fn taa_cs(@builtin(global_invocation_id) gid: vec3<u32>) {
     let hist_uv = uv - velocity;
     
     // 3x3 neighborhood variance clipping
-    var m1 = vec3(0.0);
-    var m2 = vec3(0.0);
-    for (var y = -1; y <= 1; y++) {
-        for (var x = -1; x <= 1; x++) {
-            let s = textureLoad(tHDR, vec2<i32>(px) + vec2(x, y), 0).rgb;
+    var m1 = vec3<f32>(0.0);
+    var m2 = vec3<f32>(0.0);
+    for (var y: i32 = -1; y <= 1; y = y + 1) {
+        for (var x: i32 = -1; x <= 1; x = x + 1) {
+            let s = textureLoad(tHDR, vec2<i32>(px) + vec2<i32>(x, y), 0).rgb;
             m1 += s;
             m2 += s * s;
         }
@@ -623,7 +623,7 @@ fn taa_cs(@builtin(global_invocation_id) gid: vec3<u32>) {
     m1 /= 9.0;
     m2 /= 9.0;
     
-    let variance = sqrt(max(m2 - m1 * m1, vec3(0.0)));
+    let variance = sqrt(max(m2 - m1 * m1, vec3<f32>(0.0)));
     let box_min = m1 - variance * 1.5;
     let box_max = m1 + variance * 1.5;
     
@@ -649,7 +649,7 @@ fn post_cs(@builtin(global_invocation_id) gid: vec3<u32>) {
     let r = textureSample(tHDR, sLinearClamp, uv - ca).r;
     let g = textureSample(tHDR, sLinearClamp, uv).g;
     let b = textureSample(tHDR, sLinearClamp, uv + ca).b;
-    var color = vec3(r, g, b);
+    var color = vec3<f32>(r, g, b);
     
     // Bloom
     let bloom = textureSample(tBloom, sLinearClamp, uv).rgb;
@@ -672,7 +672,7 @@ fn post_cs(@builtin(global_invocation_id) gid: vec3<u32>) {
     color += (noise - 0.5) * uPost.film_grain;
     
     // Gamma correction
-    color = pow(color, vec3(1.0 / uPost.gamma));
+    color = pow(color, vec3<f32>(1.0 / max(uPost.gamma, 1e-4)));
     
     textureStore(outFinal, vec2<i32>(px), vec4(color, 1.0));
 }

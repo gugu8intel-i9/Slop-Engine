@@ -1,4 +1,8 @@
-// Vertex shader for skybox cube
+// Vertex shader for skybox cube.
+// Compatibility/perf notes:
+// - Uses a static 36-vertex cube list (no index buffer required).
+// - Emits clip-space with z=w so the skybox always lands at the far plane.
+
 struct VSOut {
     @builtin(position) clip: vec4<f32>;
     @location(0) v_dir: vec3<f32>;
@@ -6,19 +10,32 @@ struct VSOut {
 
 @vertex
 fn vs_main(@builtin(vertex_index) idx: u32) -> VSOut {
-    // Generate a cube by vertex index (36 vertices)
-    var positions = array<vec3<f32>, 36>(
-        vec3(-1.0, -1.0, -1.0), vec3(1.0, -1.0, -1.0), vec3(1.0, 1.0, -1.0),
-        vec3(1.0, 1.0, -1.0), vec3(-1.0, 1.0, -1.0), vec3(-1.0, -1.0, -1.0),
-        // ... remaining faces omitted for brevity; include full 36 positions in real file
-        vec3(-1.0, -1.0, 1.0), vec3(1.0, -1.0, 1.0), vec3(1.0, 1.0, 1.0),
-        vec3(1.0, 1.0, 1.0), vec3(-1.0, 1.0, 1.0), vec3(-1.0, -1.0, 1.0),
-        // etc.
+    let positions = array<vec3<f32>, 36>(
+        // -Z
+        vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>( 1.0, -1.0, -1.0), vec3<f32>( 1.0,  1.0, -1.0),
+        vec3<f32>( 1.0,  1.0, -1.0), vec3<f32>(-1.0,  1.0, -1.0), vec3<f32>(-1.0, -1.0, -1.0),
+        // +Z
+        vec3<f32>(-1.0, -1.0,  1.0), vec3<f32>( 1.0, -1.0,  1.0), vec3<f32>( 1.0,  1.0,  1.0),
+        vec3<f32>( 1.0,  1.0,  1.0), vec3<f32>(-1.0,  1.0,  1.0), vec3<f32>(-1.0, -1.0,  1.0),
+        // -X
+        vec3<f32>(-1.0,  1.0,  1.0), vec3<f32>(-1.0,  1.0, -1.0), vec3<f32>(-1.0, -1.0, -1.0),
+        vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>(-1.0, -1.0,  1.0), vec3<f32>(-1.0,  1.0,  1.0),
+        // +X
+        vec3<f32>( 1.0,  1.0,  1.0), vec3<f32>( 1.0,  1.0, -1.0), vec3<f32>( 1.0, -1.0, -1.0),
+        vec3<f32>( 1.0, -1.0, -1.0), vec3<f32>( 1.0, -1.0,  1.0), vec3<f32>( 1.0,  1.0,  1.0),
+        // -Y
+        vec3<f32>(-1.0, -1.0, -1.0), vec3<f32>( 1.0, -1.0, -1.0), vec3<f32>( 1.0, -1.0,  1.0),
+        vec3<f32>( 1.0, -1.0,  1.0), vec3<f32>(-1.0, -1.0,  1.0), vec3<f32>(-1.0, -1.0, -1.0),
+        // +Y
+        vec3<f32>(-1.0,  1.0, -1.0), vec3<f32>( 1.0,  1.0, -1.0), vec3<f32>( 1.0,  1.0,  1.0),
+        vec3<f32>( 1.0,  1.0,  1.0), vec3<f32>(-1.0,  1.0,  1.0), vec3<f32>(-1.0,  1.0, -1.0)
     );
+
     var out: VSOut;
-    let pos = positions[idx];
-    // Expand to far plane by using clip w = 1 and projecting with identity view (skybox rendered in view space)
-    out.clip = vec4<f32>(pos, 1.0);
-    out.v_dir = pos;
+    let dir = positions[idx];
+
+    // Keep cube centered on the camera: project to far plane by forcing z = w.
+    out.clip = vec4<f32>(dir.xy, 1.0, 1.0);
+    out.v_dir = normalize(dir);
     return out;
 }

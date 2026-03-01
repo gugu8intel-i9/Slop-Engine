@@ -89,7 +89,12 @@ fn safe_pow(x: f32, e: f32) -> f32 {
 }
 
 // Sample neighborhood min/max for clamping (box kernel)
-fn neighborhood_minmax(uv: vec2<f32>, texel: vec2<f32>, radius: i32) -> vec2<vec3<f32>> {
+struct NeighborhoodMinMax {
+    minc: vec3<f32>,
+    maxc: vec3<f32>,
+};
+
+fn neighborhood_minmax(uv: vec2<f32>, texel: vec2<f32>, radius: i32) -> NeighborhoodMinMax {
     var minc = vec3<f32>(1e9, 1e9, 1e9);
     var maxc = vec3<f32>(-1e9, -1e9, -1e9);
     for (var y: i32 = -radius; y <= radius; y = y + 1) {
@@ -100,7 +105,7 @@ fn neighborhood_minmax(uv: vec2<f32>, texel: vec2<f32>, radius: i32) -> vec2<vec
             maxc = max(maxc, s);
         }
     }
-    return vec2<vec3<f32>>(minc, maxc);
+    return NeighborhoodMinMax(minc, maxc);
 }
 
 // Simple box blur for unsharp mask (small radius)
@@ -153,14 +158,13 @@ fn fs_main(in: VSOut) -> FSOut {
 
     // Fetch history color from previous frame at prev_uv
     // Use point sampler for history to avoid filtering ghosting; but linear can be used too.
-    let hist = textureSample(tHistory, sLinearClamp, prev_uv_clamped).xyz;
+    let hist = textureSample(tHistory, sPointClamp, prev_uv_clamped).xyz;
 
     // Optional occlusion check using depth (if provided)
     var occluded: bool = false;
     // If both depth textures are provided, compare depths to detect disocclusion
     // depth values assumed in 0..1 (linear or non-linear depending on pipeline)
-    let hasDepth = true; // assume available; if not, skip occlusion logic
-    if (hasDepth) {
+    if (uParams.history_valid == 1u) {
         let curr_depth = textureSample(tDepth, sLinearClamp, uv).x;
         let prev_depth = textureSample(tPrevDepth, sLinearClamp, prev_uv_clamped).x;
         // If depth difference is large (e.g., > threshold), mark occluded
@@ -183,8 +187,8 @@ fn fs_main(in: VSOut) -> FSOut {
     }
 
     // History validity check: if history color is NaN or extreme, discard
-    let hist_valid = all(isFinite(hist));
-    if (!hist_valid) {
+    let hist_finite = all(hist == hist) && all(abs(hist) < vec3<f32>(65504.0));
+    if (!hist_finite) {
         alpha = 0.0;
     }
 
@@ -192,8 +196,8 @@ fn fs_main(in: VSOut) -> FSOut {
     // Compute min/max in a small neighborhood around current pixel
     let clamp_radius = i32(max(1.0, floor(uParams.clamp_radius)));
     let mm = neighborhood_minmax(uv, texel, clamp_radius);
-    let minc = mm[0];
-    let maxc = mm[1];
+    let minc = mm.minc;
+    let maxc = mm.maxc;
 
     // Compute clamped history: clamp hist to [min - eps, max + eps]
     let eps = 1e-4;

@@ -3,6 +3,7 @@ name: Deploy Slop Engine
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,11 +20,9 @@ jobs:
     timeout-minutes: 10
     env:
       CARGO_TERM_PROGRESS_WHEN: never
-      CARGO_REGISTRIES_CRATES_IO_PROTOCOL: git
+      CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
       CARGO_BUILD_JOBS: 2
       CARGO_PROFILE_RELEASE_DEBUG: 0
-      # Cuts another 60 seconds off build time
-      CARGO_UNSTABLE_SPARSE_REGISTRY: true
 
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +48,13 @@ jobs:
           # WASM binaries that silently crash on startup with no error.
           # 0.12.1 is the last known good version.
           tool: wasm-pack@0.12.1
+
+      - name: Verify Rust/WASM toolchain
+        run: |
+          rustc -V
+          cargo -V
+          wasm-pack -V
+          rustup target list --installed | grep wasm32-unknown-unknown
 
       - name: Build WebAssembly
         run: wasm-pack build --target web --release
