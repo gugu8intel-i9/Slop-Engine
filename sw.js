@@ -1,11 +1,4 @@
 // sw.js
-// Improved service worker for Slop Engine:
-// - versioned cache name
-// - install: pre-cache core assets and skip waiting
-// - activate: remove old caches and claim clients
-// - fetch: network-first for navigations (SPA friendly), cache-first for other GET assets,
-//   and dynamically cache successful GET responses (JS/WASM/PNG/etc.)
-
 const CACHE_NAME = 'slop-cache-v1';
 const ASSETS = [
   './',
@@ -15,7 +8,6 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  // Pre-cache core assets and activate immediately
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => cache.addAll(ASSETS))
@@ -24,7 +16,6 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  // Remove old caches and take control of clients immediately
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
@@ -48,10 +39,9 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((networkResponse) => {
-          // Optionally update the cached index.html for offline navigations
+          const responseClone = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            // store a copy keyed by '/index.html' so fallback works
-            cache.put('./index.html', networkResponse.clone()).catch(() => {});
+            cache.put('./index.html', responseClone).catch(() => {});
           });
           return networkResponse;
         })
@@ -60,32 +50,35 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For other requests: try cache first, then network; if network succeeds, cache it.
+  // For other requests (JS, WASM, CSS, Images): Cache first, then network
   event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
+    caches.match(req).then((cachedResponse) => {
+      // Return cached asset if we have it
+      if (cachedResponse) {
+        return cachedResponse;
+      }
 
-      return fetch(req)
-        .then((networkResponse) => {
-          // Only cache successful, same-origin or CORS responses that are not opaque,
-          // but still allow opaque responses (e.g., CDN) to pass through without caching.
-          if (!networkResponse || networkResponse.status !== 200) {
-            return networkResponse;
-          }
-
-          // Clone and store a copy in the cache for future requests.
-          const responseClone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            // Use request URL as the cache key
-            cache.put(req, responseClone).catch(() => {});
-          });
-
+      // Otherwise, fetch from network
+      return fetch(req).then((networkResponse) => {
+        // Only cache successful, non-opaque responses
+        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
           return networkResponse;
-        })
-        .catch(() => {
-          // If fetch fails and nothing in cache, optionally return a fallback (could be an offline page)
-          return caches.match('./index.html');
+        }
+
+        // Clone and store dynamically
+        const responseClone = networkResponse.clone();
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put(req, responseClone).catch(() => {});
         });
+
+        return networkResponse;
+      }).catch((error) => {
+        // IMPORTANT FIX: Do NOT return index.html here. 
+        // If a JS/WASM file fails to load, returning HTML will break the app.
+        // Let it fail gracefully so the browser handles the network error properly.
+        console.error('Fetch failed for asset:', req.url, error);
+        throw error;
+      });
     })
   );
 });
