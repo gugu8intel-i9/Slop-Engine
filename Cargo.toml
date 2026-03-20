@@ -107,3 +107,18 @@ strip = true           # Strip symbols (smaller binary size)
 # Aggressive WASM size/speed optimizations
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-O4", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+
+# -----------------------------------
+# Extra Dependencies (User Added)
+# -----------------------------------
+tokio = { version = "1.35", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+rand = "0.8"
+sha2 = "0.10"
+hmac = "0.12"
+aes-gcm = "0.10"
+sysinfo = "0.30"
+tracing = "0.1"
+tracing-subscriber = "0.3"
