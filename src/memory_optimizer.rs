@@ -1,18 +1,16 @@
 //! memory_optimizer.rs
-//! Spatio-Temporal WGSL Resonance Allocator (STRA) for WebGPU/WASM Game Engines.
+//! STRA v2.0: Spatio-Temporal WGSL Resonance Allocator
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use wgpu::util::DeviceExt;
+use crossbeam_channel::{unbounded, Sender, Receiver}; // Optimal for WASM thread bridging
 
-/// Alignments required by WGSL (std140/std430)
 const WGSL_BASE_ALIGNMENT: u64 = 16;
-/// Default size of a memory chunk (16MB is optimal for WebGPU buffers)
-const CHUNK_SIZE: u64 = 16 * 1024 * 1024; 
-/// Max bytes we are allowed to defragment per frame to maintain 60/120fps
+const CHUNK_SIZE: u64 = 16 * 1024 * 1024;
 const DEFRAG_BYTES_PER_FRAME_BUDGET: u64 = 512 * 1024;
+const LARGE_UPLOAD_THRESHOLD: u64 = 256 * 1024; // > 256KB uses async DMA
 
-/// A trait that guarantees a Rust struct natively matches a WGSL struct layout.
 pub trait WgslResonant {
     fn wgsl_stride() -> u64;
     fn as_bytes(&self) -> &[u8];
@@ -20,202 +18,313 @@ pub trait WgslResonant {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryTier {
-    ColdWasmHeap,    // Exists only in WASM Memory
-    WarmStaging,     // In mapped WebGPU staging buffer
-    HotVram,         // Fast, device-local GPU memory for WGSL Compute/Render
+    ColdWasmHeap,
+    WarmStaging,
+    HotVram,
 }
 
-/// Represents a sub-allocated block of memory within a massive WebGPU buffer
 #[derive(Clone, Debug)]
 pub struct WgslAllocation {
     pub chunk_id: usize,
     pub offset: u64,
     pub size: u64,
     pub tier: MemoryTier,
-    /// A unique ID mapping back to the ECS entity or asset
-    pub resource_id: u64, 
+    pub resource_id: u64,
+}
+
+#[derive(Clone, Debug)]
+struct FreeBlock {
+    offset: u64,
+    size: u64,
 }
 
 struct MemoryChunk {
     buffer: wgpu::Buffer,
     used: u64,
     capacity: u64,
-    // Tracks free gaps for the Time-Sliced Defragmenter
-    free_blocks: Vec<(u64, u64)>, // (offset, size)
+    free_blocks: Vec<FreeBlock>,
+    // Needed to quickly find the allocation adjacent to a free block
+    allocations_by_offset: Vec<u64>, // Stores resource_ids sorted by offset
 }
 
-/// The main High-Performance Memory Optimizer
+/// Tracks the async state machine for zero-stall WASM uploads/downloads
+enum AsyncDmaTask {
+    UploadPendingMap { resource_id: u64, data: Vec<u8>, staging_buf: Arc<wgpu::Buffer> },
+    EvictPendingRead { resource_id: u64, readback_buf: Arc<wgpu::Buffer> },
+}
+
 pub struct MemoryOptimizer {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     
-    // Tiered Storage
     vram_chunks: Vec<MemoryChunk>,
-    staging_ring: VecDeque<wgpu::Buffer>,
-    
-    // Resource Tracking
     allocations: HashMap<u64, WgslAllocation>,
     
-    // Predictive Paging System
-    predictive_queue: Vec<u64>,
+    // Asynchronous State-Machine DMA
+    dma_sender: Sender<AsyncDmaTask>,
+    dma_receiver: Receiver<AsyncDmaTask>,
     
-    // Defragmentation state
+    // Backup data for evicted resources (Cold Storage)
+    wasm_cold_storage: HashMap<u64, Vec<u8>>,
+    
     defrag_cursor: usize,
 }
 
 impl MemoryOptimizer {
-    pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, ring_size: usize) -> Self {
-        // Initialize the Asynchronous Ring-Staging
-        let mut staging_ring = VecDeque::with_capacity(ring_size);
-        for _ in 0..ring_size {
-            let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("STRA_Staging_Ring_Buffer"),
-                size: CHUNK_SIZE,
-                usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            });
-            staging_ring.push_back(staging_buffer);
-        }
-
+    pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) -> Self {
+        let (dma_sender, dma_receiver) = unbounded();
+        
         Self {
             device,
             queue,
             vram_chunks: Vec::new(),
-            staging_ring,
             allocations: HashMap::new(),
-            predictive_queue: Vec::new(),
+            dma_sender,
+            dma_receiver,
+            wasm_cold_storage: HashMap::new(),
             defrag_cursor: 0,
         }
     }
 
-    /// Allocates memory directly aligned for WGSL, padding automatically.
-    /// This uses a bump-allocator strategy with gap-filling (buddy-style).
+    // ==========================================
+    // 4. ASYNC MAPPING FOR LARGE UPLOADS
+    // ==========================================
     pub fn allocate<T: WgslResonant>(&mut self, resource_id: u64, data: &T) -> WgslAllocation {
         let size = T::wgsl_stride();
-        // Pad size to WGSL base alignment bounds strictly
         let aligned_size = (size + WGSL_BASE_ALIGNMENT - 1) & !(WGSL_BASE_ALIGNMENT - 1);
 
-        // Find a chunk with space or create a new one
         let chunk_idx = self.find_or_create_chunk(aligned_size);
         let chunk = &mut self.vram_chunks[chunk_idx];
 
-        let offset = chunk.used;
-        chunk.used += aligned_size;
-
-        let allocation = WgslAllocation {
-            chunk_id: chunk_idx,
-            offset,
-            size: aligned_size,
-            tier: MemoryTier::HotVram,
-            resource_id,
+        // Advanced allocation: Try to fit in a free block first (Best-Fit)
+        let offset = if let Some(free_idx) = chunk.free_blocks.iter().position(|b| b.size >= aligned_size) {
+            let free_block = &mut chunk.free_blocks[free_idx];
+            let assigned_offset = free_block.offset;
+            free_block.offset += aligned_size;
+            free_block.size -= aligned_size;
+            if free_block.size == 0 { chunk.free_blocks.remove(free_idx); }
+            assigned_offset
+        } else {
+            let assigned_offset = chunk.used;
+            chunk.used += aligned_size;
+            assigned_offset
         };
 
+        let allocation = WgslAllocation { chunk_id: chunk_idx, offset, size: aligned_size, tier: MemoryTier::HotVram, resource_id };
         self.allocations.insert(resource_id, allocation.clone());
-        
-        // Zero-stall write using ring staging
-        self.stream_to_vram(&allocation, data.as_bytes());
+        self.insert_allocation_sorted(chunk_idx, resource_id);
+
+        let bytes = data.as_bytes().to_vec();
+
+        // Branch based on payload size
+        if aligned_size > LARGE_UPLOAD_THRESHOLD {
+            self.stream_large_async(&allocation, bytes);
+        } else {
+            // Small payloads use the immediate queue (browser optimizes this internally)
+            self.queue.write_buffer(&self.vram_chunks[chunk_idx].buffer, offset, &bytes);
+        }
 
         allocation
     }
 
-    /// Spatio-Temporal Prediction: Tell the memory manager where an entity is moving.
-    /// If it's heading towards the camera, it moves from WASM heap to VRAM *before* it's needed.
-    pub fn predict_movement(&mut self, resource_id: u64, distance_to_camera: f32, velocity_towards_camera: f32) {
-        if distance_to_camera < 100.0 && velocity_towards_camera > 0.0 {
-            // It's coming into view soon. Queue for pre-warming.
-            if let Some(alloc) = self.allocations.get(&resource_id) {
-                if alloc.tier == MemoryTier::ColdWasmHeap {
-                    self.predictive_queue.push(resource_id);
+    fn stream_large_async(&self, alloc: &WgslAllocation, data: Vec<u8>) {
+        let staging_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("STRA_Async_Staging"),
+            size: data.len() as u64,
+            usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        }));
+
+        let slice = staging_buffer.slice(..);
+        let sender = self.dma_sender.clone();
+        let res_id = alloc.resource_id;
+        let buf_clone = Arc::clone(&staging_buffer);
+
+        // Async callback: Pushes state to the DMA receiver safely across WASM bounds
+        slice.map_async(wgpu::MapMode::Write, move |result| {
+            if result.is_ok() {
+                let _ = sender.send(AsyncDmaTask::UploadPendingMap { resource_id: res_id, data, staging_buf: buf_clone });
+            }
+        });
+    }
+
+    /// Call this once per frame in the main loop to process resolved async DMA tasks
+    pub fn poll_dma_tasks(&mut self) {
+        while let Ok(task) = self.dma_receiver.try_recv() {
+            match task {
+                AsyncDmaTask::UploadPendingMap { resource_id, data, staging_buf } => {
+                    // Buffer is now mapped. Write data, unmap, and execute copy.
+                    {
+                        let mut mapped_view = staging_buf.slice(..).get_mapped_range_mut();
+                        mapped_view.copy_from_slice(&data);
+                    }
+                    staging_buf.unmap();
+
+                    if let Some(alloc) = self.allocations.get(&resource_id) {
+                        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+                        encoder.copy_buffer_to_buffer(
+                            &staging_buf, 0,
+                            &self.vram_chunks[alloc.chunk_id].buffer, alloc.offset,
+                            data.len() as u64
+                        );
+                        self.queue.submit(std::iter::once(encoder.finish()));
+                    }
+                },
+                AsyncDmaTask::EvictPendingRead { resource_id, readback_buf } => {
+                    // VRAM has been copied to readback_buf, and it is now mapped!
+                    let data = {
+                        let mapped_view = readback_buf.slice(..).get_mapped_range();
+                        mapped_view.to_vec()
+                    };
+                    readback_buf.unmap();
+                    
+                    // Store locally in WASM, officially freeing the VRAM space
+                    self.wasm_cold_storage.insert(resource_id, data);
+                    self.free_vram_allocation(resource_id);
                 }
             }
         }
     }
 
-    /// Processes predictive loading during WASM idle time.
-    pub fn process_predictive_paging(&mut self) {
-        // Pop off up to 5 predictions per frame to avoid choking the WebGPU queue
-        for _ in 0..5 {
-            if let Some(_res_id) = self.predictive_queue.pop() {
-                // In a real scenario, fetch the asset from WASM memory and push to HotVRAM
-                // self.stream_to_vram(...)
+    // ==========================================
+    // 3. EVICTION / RESIDENCY DOWNGRADE PATH
+    // ==========================================
+    /// Evicts an entity from Hot VRAM back to the WASM Heap if it hasn't been seen
+    pub fn evict_to_cold_storage(&mut self, resource_id: u64) {
+        let alloc = match self.allocations.get_mut(&resource_id) {
+            Some(a) if a.tier == MemoryTier::HotVram => a,
+            _ => return, // Already evicted or doesn't exist
+        };
+
+        alloc.tier = MemoryTier::WarmStaging; // Mark as transitioning
+
+        let readback_buf = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("STRA_Readback"),
+            size: alloc.size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        encoder.copy_buffer_to_buffer(
+            &self.vram_chunks[alloc.chunk_id].buffer, alloc.offset,
+            &readback_buf, 0,
+            alloc.size
+        );
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        // Ask WebGPU to map the buffer for reading asynchronously
+        let slice = readback_buf.slice(..);
+        let sender = self.dma_sender.clone();
+        let buf_clone = Arc::clone(&readback_buf);
+        
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            if res.is_ok() {
+                let _ = sender.send(AsyncDmaTask::EvictPendingRead { resource_id, readback_buf: buf_clone });
             }
+        });
+    }
+
+    fn free_vram_allocation(&mut self, resource_id: u64) {
+        if let Some(alloc) = self.allocations.remove(&resource_id) {
+            let chunk = &mut self.vram_chunks[alloc.chunk_id];
+            chunk.free_blocks.push(FreeBlock { offset: alloc.offset, size: alloc.size });
+            chunk.allocations_by_offset.retain(|&id| id != resource_id);
+            
+            // Trigger the coalescer!
+            self.coalesce_free_blocks(alloc.chunk_id);
         }
     }
 
-    /// The Zero-Stall Ring Buffered Staging upload
-    fn stream_to_vram(&mut self, alloc: &WgslAllocation, data: &[u8]) {
-        // Pop the front staging buffer (assuming it's ready/unmapped)
-        let staging_buffer = self.staging_ring.pop_front().expect("Staging ring starved!");
-        
-        // Write to staging buffer. In a real WASM app, you map async, but for immediate 
-        // small writes `write_buffer` is optimized internally by browsers. 
-        // For massive writes, we'd use wgpu buffer mapping here.
-        self.queue.write_buffer(&staging_buffer, 0, data);
+    // ==========================================
+    // 1. FREE-BLOCK COALESCING
+    // ==========================================
+    /// Contiguous-Spectrum Coalescing: Merges adjacent free blocks to fight long-term fragmentation
+    fn coalesce_free_blocks(&mut self, chunk_id: usize) {
+        let chunk = &mut self.vram_chunks[chunk_id];
+        if chunk.free_blocks.is_empty() { return; }
 
-        // Schedule GPU-side copy from Staging -> Hot VRAM Chunk
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("STRA_Stream_Encoder"),
-        });
+        // Sort by offset so adjacent blocks are next to each other in the array
+        chunk.free_blocks.sort_unstable_by_key(|b| b.offset);
 
-        encoder.copy_buffer_to_buffer(
-            &staging_buffer,
-            0,
-            &self.vram_chunks[alloc.chunk_id].buffer,
-            alloc.offset,
-            data.len() as u64,
-        );
+        let mut coalesced = Vec::with_capacity(chunk.free_blocks.len());
+        let mut current = chunk.free_blocks[0].clone();
 
-        self.queue.submit(std::iter::once(encoder.finish()));
-
-        // Cycle the staging buffer to the back of the queue
-        self.staging_ring.push_back(staging_buffer);
+        for block in chunk.free_blocks.iter().skip(1) {
+            if current.offset + current.size == block.offset {
+                // They touch! Merge them.
+                current.size += block.size;
+            } else {
+                coalesced.push(current);
+                current = block.clone();
+            }
+        }
+        coalesced.push(current);
+        chunk.free_blocks = coalesced;
     }
 
-    /// Time-Sliced Micro-Defragmentation
-    /// Web Game Engines stutter during GC. This does tiny bits of defrag entirely on the GPU
-    /// over many frames, invisible to the player.
+    // ==========================================
+    // 2. REAL DEFRAGMENTATION LOGIC
+    // ==========================================
+    /// GPU-Timeline Shift Defragmentation
+    /// Finds gaps in VRAM and shifts right-side allocations to the left using `copy_buffer_to_buffer`.
     pub fn micro_defrag_tick(&mut self) {
         if self.vram_chunks.is_empty() { return; }
 
-        let mut bytes_moved = 0;
-        let chunk = &mut self.vram_chunks[self.defrag_cursor];
+        let chunk_id = self.defrag_cursor;
+        let chunk = &mut self.vram_chunks[chunk_id];
+        
+        // Coalesce before checking gaps to ensure maximum shifting efficiency
+        self.coalesce_free_blocks(chunk_id);
 
-        // If chunk is highly fragmented (many free gaps)
-        if !chunk.free_blocks.is_empty() {
-            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("STRA_Defrag_Encoder"),
-            });
+        if let Some(first_gap) = chunk.free_blocks.first().cloned() {
+            // Find the allocation sitting immediately *after* the gap
+            let target_res_id = chunk.allocations_by_offset.iter()
+                .find(|&&id| self.allocations[&id].offset >= first_gap.offset + first_gap.size)
+                .cloned();
 
-            // Find an active allocation that is located *after* a free gap
-            // Shift it leftward on the GPU to close the gap.
-            // (Simplified pseudo-logic for the shift)
-            if bytes_moved < DEFRAG_BYTES_PER_FRAME_BUDGET {
-                // Shift logic:
-                // encoder.copy_buffer_to_buffer(buffer, old_offset, buffer, new_offset, size);
-                // Update allocation table
-                bytes_moved += 256 * 1024; // Simulated byte movement cost
+            if let Some(res_id) = target_res_id {
+                let mut alloc = self.allocations.get_mut(&res_id).unwrap().clone();
+                
+                // Safety boundary: Ensure we don't exceed frame timing
+                if alloc.size <= DEFRAG_BYTES_PER_FRAME_BUDGET {
+                    let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("STRA_Defrag") });
+
+                    // Execute the shift on the GPU timeline! Zero CPU iteration.
+                    encoder.copy_buffer_to_buffer(
+                        &chunk.buffer, alloc.offset,       // Source (old position)
+                        &chunk.buffer, first_gap.offset,   // Destination (start of gap)
+                        alloc.size
+                    );
+                    self.queue.submit(std::iter::once(encoder.finish()));
+
+                    // Update Rust state
+                    let old_offset = alloc.offset;
+                    alloc.offset = first_gap.offset;
+                    
+                    // Shift the free block rightward
+                    chunk.free_blocks[0].offset += alloc.size; 
+                    
+                    self.allocations.insert(res_id, alloc);
+                    
+                    // Re-sort allocation tracking
+                    chunk.allocations_by_offset.sort_unstable_by_key(|&id| self.allocations[&id].offset);
+                }
             }
-
-            self.queue.submit(std::iter::once(encoder.finish()));
         }
 
-        // Cycle the defrag cursor over frames
         self.defrag_cursor = (self.defrag_cursor + 1) % self.vram_chunks.len();
     }
 
-    /// Returns the WebGPU buffer for a specific chunk, to be bound to a BindGroup
-    pub fn get_wgsl_buffer(&self, chunk_id: usize) -> &wgpu::Buffer {
-        &self.vram_chunks[chunk_id].buffer
-    }
-
+    // ==========================================
+    // Internal Utilities
+    // ==========================================
     fn find_or_create_chunk(&mut self, size: u64) -> usize {
         for (i, chunk) in self.vram_chunks.iter().enumerate() {
-            if chunk.capacity - chunk.used >= size {
-                return i;
-            }
+            if chunk.capacity - chunk.used >= size { return i; }
+            if chunk.free_blocks.iter().any(|b| b.size >= size) { return i; } // Check for fitting gap
         }
 
-        // Create new VRAM Chunk if full
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("STRA_VRAM_Chunk_{}", self.vram_chunks.len())),
             size: CHUNK_SIZE,
@@ -223,13 +332,18 @@ impl MemoryOptimizer {
             mapped_at_creation: false,
         });
 
-        let chunk = MemoryChunk {
-            buffer,
-            used: 0,
-            capacity: CHUNK_SIZE,
+        self.vram_chunks.push(MemoryChunk {
+            buffer, used: 0, capacity: CHUNK_SIZE,
             free_blocks: Vec::new(),
-        };
-
-        self.vram_chunks.push(chunk);
+            allocations_by_offset: Vec::new(),
+        });
+        
         self.vram_chunks.len() - 1
     }
+
+    fn insert_allocation_sorted(&mut self, chunk_id: usize, resource_id: u64) {
+        let chunk = &mut self.vram_chunks[chunk_id];
+        chunk.allocations_by_offset.push(resource_id);
+        chunk.allocations_by_offset.sort_unstable_by_key(|&id| self.allocations[&id].offset);
+    }
+}
