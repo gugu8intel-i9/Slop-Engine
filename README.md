@@ -3,7 +3,7 @@
 
 https://github.com/user-attachments/assets/fb64874c-fde1-4500-a9d6-959070eba808
 
-# The specs are
+### The specs are
 
  * ```Intel(R) Core(TM) i5-2400S CPU @ 2.50GHz```
 
