@@ -1,4 +1,16 @@
 # Slop Engine  
+
+
+https://github.com/user-attachments/assets/fb64874c-fde1-4500-a9d6-959070eba808
+
+# The specs are
+
+ * ```Intel(R) Core(TM) i5-2400S CPU @ 2.50GHz```
+
+* ```AMD Radeon HD 6750M```
+
+* ```Size: 8 GB Type: DDR3 Speed: 1333 MHz```
+
 A hyper‑optimized, modern real‑time rendering engine built for performance, clarity, and raw power.
 
 Slop Engine is a fully‑modular, high‑performance real‑time engine designed around modern GPU pipelines, zero‑waste memory usage, and hot‑reloadable systems. Every subsystem is engineered for predictable performance, low latency, and maximum feature density without sacrificing clarity or extensibility.
