@@ -9,9 +9,10 @@ https://github.com/user-attachments/assets/fb64874c-fde1-4500-a9d6-959070eba808
 
 * ```AMD Radeon HD 6750M```
 
-* ```Size: 8 GB Type: DDR3 Speed: 1333 MHz```
+* ```Size: 32 GB Type: DDR3 Speed: 1333 MHz```
 
 This is running straight 8000 FPS uncapped, no stuttering.
+(Please note that the video playback is 4K at 144 FPS so that is the video not the actual frame rate)
 
 A hyper‑optimized, modern real‑time rendering engine built for performance, clarity, and raw power.
 
