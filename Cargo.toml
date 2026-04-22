@@ -48,6 +48,20 @@ gltf = "1.4"
 gltf-json = "1.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
+# -----------------------------------
+# Extra Dependencies (User Added)
+# -----------------------------------
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+rand = "0.8"
+sha2 = "0.10"
+hmac = "0.12"
+aes-gcm = "0.10"
+sysinfo = "0.30"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
 # ===================================
 # Native-Only Dependencies (Windows/Mac/Linux)
 # ===================================
@@ -92,33 +106,18 @@ split-debuginfo = "unpacked" # Faster compilation on mac/linux
 
 # 🔥 ENGINE SECRET SAUCE:
 # Compile all dependencies with max optimization even in debug mode.
-# This keeps your Physics (Rapier) and Renderer (wgpu) running at 60+ FPS 
+# This keeps your Physics (Rapier) and Renderer (wgpu) running at 60+ FPS
 # during development, while your own code compiles instantly.
 [profile.dev.package."*"]
 opt-level = 3
 
 [profile.release]
 opt-level = 3
-lto = "fat"            # Maximize performance across crate boundaries
-codegen-units = 1      # Slower compile, but significantly faster binary
-strip = true           # Strip symbols (smaller binary size)
+lto = "fat" # Maximize performance across crate boundaries
+codegen-units = 1 # Slower compile, but significantly faster binary
+strip = true # Strip symbols (smaller binary size)
 # Removed `panic = "abort"` so `catch_unwind` and our crash-logger in main.rs actually work!
 
 # Aggressive WASM size/speed optimizations
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-O4", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
-
-# -----------------------------------
-# Extra Dependencies (User Added)
-# -----------------------------------
-tokio = { version = "1.35", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "1.0"
-rand = "0.8"
-sha2 = "0.10"
-hmac = "0.12"
-aes-gcm = "0.10"
-sysinfo = "0.30"
-tracing = "0.1"
-tracing-subscriber = "0.3"
