@@ -9,11 +9,15 @@
 
 use crate::{Result, bail, Context, OptionContext};
 use crate::error::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use dashmap::DashMap;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::time::{timeout, Duration};
+#[cfg(not(target_arch = "wasm32"))]
 use tokio_util::sync::CancellationToken;
 use tracing::{info_span, Instrument};
+#[cfg(not(target_arch = "wasm32"))]
 use async_trait::async_trait;
 
 /// Your shared context struct (define in your crate, e.g. `RequestCtx`, `OrderCtx`, `DataRecordCtx`).

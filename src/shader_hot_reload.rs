@@ -18,7 +18,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
+#[cfg(not(target_arch = "wasm32"))]
 use crossbeam_channel::{unbounded, Receiver, Sender};
+#[cfg(target_arch = "wasm32")]
+use std::sync::mpsc::{channel as unbounded, Receiver, Sender};
+#[cfg(not(target_arch = "wasm32"))]
 use notify::{Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use wgpu::util::DeviceExt;

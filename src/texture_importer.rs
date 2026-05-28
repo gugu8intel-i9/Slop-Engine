@@ -2,11 +2,15 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
 use exr::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 use ktx2::Reader as Ktx2Reader;
 use image::codecs::hdr::HdrDecoder;
+#[cfg(not(target_arch = "wasm32"))]
 use memmap2::MmapOptions;
 use thiserror::Error;
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 /// Unified error type for texture importing.

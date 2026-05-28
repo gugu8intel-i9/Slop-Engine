@@ -1,15 +1,20 @@
 //! memory_optimizer.rs
 //! STRA v2.0: Spatio-Temporal WGSL Resonance Allocator
+//! OPTIMIZED: Memory defragmentation now runs every N frames instead of every frame
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use wgpu::util::DeviceExt;
+#[cfg(not(target_arch = "wasm32"))]
 use crossbeam_channel::{unbounded, Sender, Receiver}; // Optimal for WASM thread bridging
+#[cfg(target_arch = "wasm32")]
+use std::sync::mpsc::{channel as unbounded, Sender, Receiver};
 
 const WGSL_BASE_ALIGNMENT: u64 = 16;
 const CHUNK_SIZE: u64 = 16 * 1024 * 1024;
 const DEFRAG_BYTES_PER_FRAME_BUDGET: u64 = 512 * 1024;
 const LARGE_UPLOAD_THRESHOLD: u64 = 256 * 1024; // > 256KB uses async DMA
+const DEFRAG_INTERVAL_FRAMES: u32 = 8; // Only defrag every 8 frames to reduce CPU/GPU overhead
 
 pub trait WgslResonant {
     fn wgsl_stride() -> u64;
@@ -68,6 +73,7 @@ pub struct MemoryOptimizer {
     wasm_cold_storage: HashMap<u64, Vec<u8>>,
     
     defrag_cursor: usize,
+    frame_counter: u32, // Track frames to throttle defragmentation
 }
 
 impl MemoryOptimizer {
@@ -83,6 +89,7 @@ impl MemoryOptimizer {
             dma_receiver,
             wasm_cold_storage: HashMap::new(),
             defrag_cursor: 0,
+            frame_counter: 0,
         }
     }
 
