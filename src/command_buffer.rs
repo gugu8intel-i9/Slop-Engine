@@ -1,4 +1,7 @@
+#[cfg(not(target_arch = "wasm32"))]
 use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError};
+#[cfg(target_arch = "wasm32")]
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel as bounded};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};

@@ -1,4 +1,7 @@
+#[cfg(not(target_arch = "wasm32"))]
 use crossbeam::channel::{Sender, Receiver, unbounded};
+#[cfg(target_arch = "wasm32")]
+use std::sync::mpsc::{Sender, Receiver, channel as unbounded};
 use nalgebra::{Point2, Point3, Unit, Vector2, Vector3, Rotation2, Rotation3, Isometry2, Isometry3};
 use rapier2d::prelude as rap2d;
 use rapier3d::prelude as rap3d;

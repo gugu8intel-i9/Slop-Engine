@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 

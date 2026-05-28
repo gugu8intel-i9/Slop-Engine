@@ -20,16 +20,19 @@ use std::{
     thread, f32::consts::PI,
     cmp::Ordering,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::mpsc;
 use serde::{Serialize, Deserialize};
 use thiserror::Error;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use sha2::{Sha256, Sha512, Digest};
 use hmac::{Hmac, Mac};
+#[cfg(not(target_arch = "wasm32"))]
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use sysinfo::{System, SystemExt, ProcessExt, Pid, ProcessStatus};
 use parking_lot::RwLock as ParkRwLock;
 use lru::LruCache;

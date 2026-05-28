@@ -1,0 +1,46 @@
+```
+# Rust-specific ignores
+target/
+Cargo.lock
+
+# Dependencies
+vendor/
+
+# Compiled and build artifacts
+**/*.rs.bk
+**/*.rlib
+**/*.so
+**/*.dylib
+**/*.dll
+**/*.a
+**/*.lib
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Editors
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
+.env.*
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Cache directories
+**/__pycache__/
+**/.mypy_cache/
+**/.pytest_cache/
+**/.ruff_cache/
+```
