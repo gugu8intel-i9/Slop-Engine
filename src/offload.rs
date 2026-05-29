@@ -7,9 +7,15 @@
 //! - Zero-Copy Staging: Lock-free DMA ring buffer for VRAM uploads.
 //! - Speculative Execution: Predicts and pre-fetches dependency chains.
 
+#[cfg(not(target_arch = "wasm32"))]
 use crossbeam_channel::{unbounded, Receiver, Sender};
+#[cfg(target_arch = "wasm32")]
+use std::sync::mpsc::{channel as unbounded, Receiver, Sender};
+#[cfg(not(target_arch = "wasm32"))]
 use crossbeam_queue::SegQueue;
+#[cfg(not(target_arch = "wasm32"))]
 use dashmap::DashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use memmap2::MmapMut;
 use parking_lot::{Mutex, RwLock};
 use std::collections::{HashMap, VecDeque};
@@ -20,7 +26,9 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::task::JoinHandle;
+#[cfg(not(target_arch = "wasm32"))]
 use uuid::Uuid;
 
 // ============================================================================

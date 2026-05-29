@@ -32,10 +32,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 use glam::{Mat4, Vec3, Vec4};
 use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
+#[cfg(not(target_arch = "wasm32"))]
 use futures::{channel::oneshot, executor::block_on};
 
 // ---------------------------------------------------------------------------

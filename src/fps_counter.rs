@@ -1,55 +1,73 @@
-use std::time::{Duration, Instant};
+// fps_counter.rs
 
+use web_sys::Performance;
+
+/// A browser‑safe FPS counter using `performance.now()`.
 pub struct FpsCounter {
-    frame_times: [f32; 128], // store last N frame times (ms)
-    index: usize,
-    last_instant: Instant,
-    frames: usize,
+    perf: Performance,
+    last_time: f64,
+    frame_count: u32,
+    accum_time: f64,
+    fps: f32,
+    update_interval: f64,
+    smoothing: f32,
 }
 
 impl FpsCounter {
-    pub fn new() -> Self {
+    /// Create a new FPS counter.
+    /// `update_interval_secs` – how often to update FPS (e.g. 0.5 or 1.0)
+    /// `smoothing` – exponential smoothing factor [0.0, 1.0]
+    pub fn new(update_interval_secs: f32, smoothing: f32) -> Self {
+        let perf = web_sys::window()
+            .expect("no window")
+            .performance()
+            .expect("performance API unavailable");
+
+        let now = perf.now();
+
         Self {
-            frame_times: [0.0; 128],
-            index: 0,
-            last_instant: Instant::now(),
-            frames: 0,
+            perf,
+            last_time: now,
+            frame_count: 0,
+            accum_time: 0.0,
+            fps: 0.0,
+            update_interval: update_interval_secs.max(0.001) as f64 * 1000.0,
+            smoothing: smoothing.clamp(0.0, 1.0),
         }
     }
 
-    /// Call at the start of a frame (or end) to record timing.
+    /// Default: update every 1s, light smoothing.
+    pub fn default() -> Self {
+        Self::new(1.0, 0.3)
+    }
+
+    /// Call once per frame.
     pub fn tick(&mut self) {
-        let now = Instant::now();
-        let dt = now.duration_since(self.last_instant);
-        self.last_instant = now;
-        let ms = dt.as_secs_f32() * 1000.0;
-        self.frame_times[self.index] = ms;
-        self.index = (self.index + 1) % self.frame_times.len();
-        self.frames += 1;
-    }
+        let now = self.perf.now();
+        let dt = now - self.last_time;
+        self.last_time = now;
 
-    /// Returns averaged FPS and frame time in ms over the buffer.
-    pub fn averaged(&self) -> (f32, f32) {
-        let mut sum = 0.0f32;
-        let mut count = 0;
-        for &v in &self.frame_times {
-            if v > 0.0 {
-                sum += v;
-                count += 1;
+        self.frame_count += 1;
+        self.accum_time += dt;
+
+        if self.accum_time >= self.update_interval {
+            let seconds = self.accum_time / 1000.0;
+            let raw_fps = self.frame_count as f64 / seconds;
+
+            if self.fps == 0.0 {
+                self.fps = raw_fps as f32;
+            } else {
+                self.fps = self.fps * self.smoothing
+                    + (raw_fps as f32) * (1.0 - self.smoothing);
             }
+
+            self.frame_count = 0;
+            self.accum_time = 0.0;
         }
-        if count == 0 {
-            return (0.0, 0.0);
-        }
-        let avg_ms = sum / count as f32;
-        (1000.0 / avg_ms, avg_ms)
     }
 
-    /// Print a periodic log every N frames (useful while running).
-    pub fn log_every(&self, every: usize) {
-        if self.frames % every == 0 {
-            let (fps, ms) = self.averaged();
-            println!("FPS: {:.1}, Frame time: {:.3} ms", fps, ms);
-        }
+    /// Current FPS estimate.
+    pub fn fps(&self) -> f32 {
+        self.fps
     }
 }

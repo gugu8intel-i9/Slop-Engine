@@ -2,7 +2,7 @@
 //! High-performance Resource Manager
 //! - Handles: compact u32 handles with generation
 //! - Deduplication: xxhash64 on bytes
-//! - LRU cache for textures
+//! - LRU cache for textures with O(1) lookup via HashMap
 //! - Staging pool for uploads
 //! - BindGroup caching
 //! - Minimal allocations and low CPU/GPU overhead
@@ -117,8 +117,8 @@ pub struct ResourceManager {
     material_slab: RwLock<Vec<Option<MaterialRecord>>>,
     material_gens: RwLock<Vec<u8>>,
 
-    // dedupe: hash -> handle index
-    texture_hash_map: RwLock<HashMap<u64, usize>>,
+    // dedupe: hash -> handle index (using FxHashMap for faster hashing)
+    texture_hash_map: RwLock<FxHashMap<u64, usize>>,
 
     // LRU cache for textures by handle index
     texture_lru: Mutex<LruCache<usize, ()>>,
@@ -151,7 +151,7 @@ impl ResourceManager {
             mesh_gens: RwLock::new(Vec::new()),
             material_slab: RwLock::new(Vec::new()),
             material_gens: RwLock::new(Vec::new()),
-            texture_hash_map: RwLock::new(HashMap::new()),
+            texture_hash_map: RwLock::new(FxHashMap::default()),
             texture_lru: Mutex::new(lru),
             current_texture_bytes: Mutex::new(0),
             bind_group_cache: Mutex::new(LruCache::new(cfg.max_bind_group_cache)),

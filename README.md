@@ -1,24 +1,35 @@
-# **Slop Engine**  
-### *A hyper‑optimized, modern real‑time rendering engine built for performance, clarity, and raw power.*
+# Slop Engine  
 
-Slop Engine is a fully‑modular, high‑performance real‑time engine designed around **modern GPU pipelines**, **zero‑waste memory usage**, and **hot‑reloadable systems**. Every subsystem is engineered for **predictable performance**, **low latency**, and **maximum feature density** without sacrificing clarity or extensibility.
 
-This engine is built for developers who want **full control**, **cutting‑edge rendering**, and **no compromises**.
+https://github.com/user-attachments/assets/fb64874c-fde1-4500-a9d6-959070eba808
 
----
+### Specs
 
-## **✨ Core Features**
+ * ```Intel(R) Core(TM) i5-2400S CPU @ 2.50GHz```
 
-### **⚡ Ultra‑Fast Renderer**
-- Modern **bindless‑leaning architecture**
+* ```AMD Radeon HD 6750M```
+
+* ```Size: 32 GB Type: DDR3 Speed: 1333 MHz```
+
+This is running straight 8000 FPS uncapped, no stuttering.
+(Please note that the video playback is 4K at 144 FPS so that is the video not the actual frame rate)
+
+A hyper‑optimized, modern real‑time rendering engine built for performance, clarity, and raw power.
+
+Slop Engine is a fully‑modular, high‑performance real‑time engine designed around modern GPU pipelines, zero‑waste memory usage, and hot‑reloadable systems. Every subsystem is engineered for predictable performance, low latency, and maximum feature density without sacrificing clarity or extensibility.
+
+This engine is built for developers who want full control, cutting‑edge rendering, and no compromises.
+
+✨ Core Features
+
+⚡ Ultra‑Fast Renderer
+- Modern bindless‑leaning architecture
 - GPU‑driven rendering paths
-- High‑performance **Mesh + Material** system
+- High‑performance Mesh + Material system
 - 2D & 3D shader support with unified pipeline
 - Full PBR with advanced BRDF, clearcoat, sheen, anisotropy, transmission, subsurface
 
----
-
-### **🌑 Advanced Lighting**
+🌑 Advanced Lighting
 - Directional, point, and spot lights
 - Physically‑based shading
 - Shadow atlas with:
@@ -30,9 +41,7 @@ This engine is built for developers who want **full control**, **cutting‑edge 
 - Contact shadows hook
 - Light LOD system
 
----
-
-### **🌌 Sky & IBL**
+🌌 Sky & IBL
 - HDR environment loading (EXR/HDR/PNG)
 - GPU‑accelerated PMREM generation
 - Prefiltered specular cubemap (GGX)
@@ -40,28 +49,21 @@ This engine is built for developers who want **full control**, **cutting‑edge 
 - BRDF LUT generation
 - Procedural sky with atmospheric scattering
 
----
-
-### **🎨 Materials**
+🎨 Materials
 - Full PBR material system
 - ORM packing (Occlusion/Roughness/Metallic)
 - Normal, emissive, clearcoat, sheen, transmission, subsurface maps
-- Bitflag‑driven feature toggles (no wasted texture fetches)
+- Bitflag‑driven feature toggles
 - Bind group caching
 - Hot‑reloadable shaders
 
----
-
-### **🧱 Scene Graph / ECS**
+🧱 Scene Graph / ECS
 - High‑performance hierarchical scene graph
 - Optional ECS mode for large‑scale worlds
 - Transform propagation optimized for cache locality
 - Culling hooks (frustum, occlusion, LOD)
 
----
-
-### **📦 Resource Manager**
-A hyper‑optimized resource system designed for:
+📦 Resource Manager
 - Zero‑copy GPU uploads
 - Streaming‑friendly asset loading
 - Deduplication of textures, meshes, shaders
@@ -69,26 +71,20 @@ A hyper‑optimized resource system designed for:
 - Extremely low RAM footprint
 - Async loading support
 
----
-
-### **🎮 Input System**
+🎮 Input System
 - High‑performance, event‑driven input
 - Keyboard, mouse, controller abstraction
 - Input mapping layer
 - Low‑latency polling mode
 
----
-
-### **📷 Camera Controller**
+📷 Camera Controller
 - Free‑fly, orbit, follow, cinematic spline, orthographic
 - Collision‑aware camera movement
 - Smooth damping, acceleration, input smoothing
 - GPU‑ready camera uniform
 - Frustum extraction for culling
 
----
-
-### **🌫️ Post‑Processing**
+🌫️ Post‑Processing
 - HDR pipeline
 - ACES/Filmic tonemapping
 - Bloom (multi‑scale)
@@ -101,74 +97,27 @@ A hyper‑optimized resource system designed for:
 - Lens effects (vignette, chromatic aberration, grain)
 - Modular pass chain
 
----
-
-### **🔥 Shader Hot Reload**
+🔥 Shader Hot Reload
 - Watches WGSL files in real time
 - Debounced rebuilds
 - Safe pipeline recreation
-- Include support (`#include "file.wgsl"`)
+- Include support (#include "file.wgsl")
 - Error overlay support
 - Zero‑downtime pipeline swapping
 
----
+🚀 Getting Started
 
-## **📁 Project Structure**
+1. Clone  
+``` git clone https://github.com/yourname/slop-engine ```
+``` cd slop-engine ```
 
-```
-/src
-  camera_controller.rs
-  input.rs
-  material.rs
-  mesh.rs
-  pbr_materials.rs
-  post_processing.rs
-  resource_manager.rs
-  scene_graph.rs
-  shader_hot_reload.rs
-  shadows.rs
-  skybox.rs
-  renderer.rs
-  engine.rs
+2. Build  
+``` cargo run --release ```
 
-/shaders
-  pbr_full.wgsl
-  shadow_depth.wgsl
-  shadow_sampling.wgsl
-  skybox_vert.wgsl
-  skybox_frag.wgsl
-  prefilter_env.wgsl
-  irradiance_conv.wgsl
-  brdf_lut.wgsl
-  post_blit.wgsl
-  bloom_*.wgsl
-  taa.wgsl
-  ssao.wgsl
-  ssr.wgsl
-  dof.wgsl
-```
+3. Edit Shaders Live  
+Open any .wgsl file — the engine will hot‑reload it instantly.
 
----
-
-## **🚀 Getting Started**
-
-### **1. Clone**
-```
-git clone https://github.com/yourname/slop-engine
-cd slop-engine
-```
-
-### **2. Build**
-```
-cargo run --release
-```
-
-### **3. Edit Shaders Live**
-Just open any `.wgsl` file — the engine will hot‑reload it instantly.
-
----
-
-## **🧪 Roadmap**
+🧪 Roadmap
 - GPU‑driven culling (meshlet / cluster)
 - Bindless textures (when stable in wgpu)
 - GPU particle system
@@ -176,28 +125,20 @@ Just open any `.wgsl` file — the engine will hot‑reload it instantly.
 - Ray tracing backend (DXR / Vulkan RT)
 - Editor UI (ImGui or custom)
 
----
+📜 License (AGPLv3)
 
-## **📜 License**
-GNU Affero General Public License
+``` Slop Engine is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License version 3 as published by the Free Software Foundation. Slop Engine is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. You should have received a copy of the GNU Affero General Public License along with this program. If not, see: https://www.gnu.org/licenses/ ```
 
----
-
-## **🤝 Contributing**
+🤝 Contributing
 Contributions are welcome — especially around:
 - New rendering passes
 - Optimization
 - Shader improvements
 - Documentation
 
----
+💬 Final Notes
+Slop Engine is built for developers who want full control, maximum performance, and modern rendering techniques without the bloat of traditional engines. Every subsystem is slopped for clarity, speed, and extensibility.
 
-## **💬 Final Notes**
-Slop Engine is built for developers who want **full control**, **maximum performance**, and **modern rendering techniques** without the bloat of traditional engines. Every subsystem is slopped for clarity, speed, and extensibility.
-
-   
-   * If you wish to contribute, please be a sponsor, because these API costs are getting expensive
-   
-   * If any issue occurs, please put an issue out
-   
-   ### Please note that this will not work, because it is pure AI slop
+* If you wish to contribute, please be a sponsor, because these API costs are getting expensive  
+* If any issue occurs, please put an issue out  
+* Please note that this will not work, because it is pure AI slop
