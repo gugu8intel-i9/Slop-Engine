@@ -1,22 +1,37 @@
 // src/network.rs
-// OPTIMIZED: Client-side prediction, delta compression, interest management, and ping reduction
+//! OPTIMIZED: Network system with client-side prediction, delta compression, and ping reduction
+//! 
+//! This module provides:
+//! - Client-side prediction and reconciliation
+//! - Delta compression for bandwidth reduction
+//! - Interest management (only sync visible entities)
+//! - Rollback netcode support
+//! - RTT estimation and packet batching
 
 use std::collections::{HashMap, VecDeque, HashSet};
-use std::net::{SocketAddr, UdpSocket, TcpStream, Shutdown};
-use std::io::{Read, Write};
+use std::net::{SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use parking_lot::{RwLock, Mutex};
 use serde::{Deserialize, Serialize};
 use bincode;
 
-const PACKET_HEADER_SIZE: usize = 8;
-const INPUT_BUFFER_SIZE: usize = 128; // ~2 seconds at 60fps
-const STATE_BUFFER_SIZE: usize = 30; // Keep 0.5s of states for rollback
-const MAX_PACKET_SIZE: usize = 1400; // MTU safe limit
-const COMPRESSION_THRESHOLD: usize = 256; // Only compress payloads > 256 bytes
+use glam::{Vec3, Vec2};
 
-/// Network role for this instance
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+const PACKET_HEADER_SIZE: usize = 8;
+const INPUT_BUFFER_SIZE: usize = 128;
+const STATE_BUFFER_SIZE: usize = 30;
+const MAX_PACKET_SIZE: usize = 1400;
+const COMPRESSION_THRESHOLD: usize = 256;
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NetworkRole {
     Server,
@@ -24,7 +39,6 @@ pub enum NetworkRole {
     Host,
 }
 
-/// Connection state
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ConnectionState {
     Connecting,
@@ -33,14 +47,17 @@ pub enum ConnectionState {
     Disconnected,
 }
 
-/// Channel types for different reliability requirements
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ChannelType {
-    ReliableOrdered,    // Game state, inputs
-    ReliableUnordered,  // Player info, chat
-    UnreliableOrdered,  // Not used typically
-    UnreliableUnordered, // Position updates, non-critical
+    ReliableOrdered,
+    ReliableUnordered,
+    UnreliableOrdered,
+    UnreliableUnordered,
 }
+
+// ============================================================================
+// CORE TYPES
+// ============================================================================
 
 /// Network message with channel support
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -49,10 +66,10 @@ pub struct NetworkMessage {
     pub channel: ChannelType,
     pub data: Vec<u8>,
     pub timestamp: u64,
-    pub sequence: u32, // For ordering/reliability
+    pub sequence: u32,
 }
 
-/// Connection with advanced telemetry
+/// Connection with telemetry
 #[derive(Clone, Debug)]
 pub struct Connection {
     pub peer_id: u64,
@@ -90,14 +107,14 @@ impl Connection {
     }
 }
 
-/// Replicated entity state with delta support
+/// Replicated entity state
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplicatedState {
     pub entity_id: u64,
     pub state_data: Vec<u8>,
     pub sequence_number: u32,
     pub timestamp: u64,
-    pub delta_from: u32, // Previous sequence number for delta compression
+    pub delta_from: u32,
     pub is_delta: bool,
 }
 
@@ -121,13 +138,45 @@ impl GameInput {
     }
 }
 
-/// Rollback state for deterministic simulation
+/// Rollback state
 #[derive(Clone, Debug)]
 pub struct RollbackState {
     pub frame: u32,
     pub state_hash: u32,
     pub inputs: Vec<GameInput>,
     pub timestamp: u64,
+}
+
+/// ENTITY SNAPSHOT - Used by predictive renderer
+#[derive(Debug, Clone)]
+pub struct EntitySnapshot {
+    pub id: u64,
+    pub position: Vec3,
+    pub rotation: Vec3,
+    pub scale: Vec3,
+    pub bounds_min: Vec3,
+    pub bounds_max: Vec3,
+}
+
+impl EntitySnapshot {
+    pub fn new(id: u64, position: Vec3, rotation: Vec3, scale: Vec3) -> Self {
+        Self {
+            id,
+            position,
+            rotation,
+            scale,
+            bounds_min: position - scale * 0.5,
+            bounds_max: position + scale * 0.5,
+        }
+    }
+    
+    pub fn center(&self) -> Vec3 {
+        (self.bounds_min + self.bounds_max) * 0.5
+    }
+    
+    pub fn velocity(&self, previous: &EntitySnapshot) -> Vec3 {
+        self.position - previous.position
+    }
 }
 
 /// Client-side prediction state
@@ -139,14 +188,12 @@ struct PredictedState {
     input_sequence: u32,
 }
 
-/// Pending input acknowledgment for reconciliation
 struct PendingInput {
     input: GameInput,
     sent_at: Instant,
     acknowledged: bool,
 }
 
-/// Delta compression context
 struct DeltaContext {
     last_state: Option<Vec<u8>>,
     last_sequence: u32,
@@ -161,7 +208,10 @@ impl Default for DeltaContext {
     }
 }
 
-/// OPTIMIZED: Network system with replication, rollback, and latency reduction
+// ============================================================================
+// NETWORK SYSTEM
+// ============================================================================
+
 pub struct NetworkSystem {
     role: NetworkRole,
     connections: RwLock<HashMap<u64, Connection>>,
@@ -169,29 +219,24 @@ pub struct NetworkSystem {
     replicated_entities: RwLock<HashMap<u64, ReplicatedState>>,
     delta_contexts: RwLock<HashMap<u64, DeltaContext>>,
     
-    // Rollback netcode buffers
     input_buffer: RwLock<VecDeque<GameInput>>,
     rollback_states: RwLock<VecDeque<RollbackState>>,
     
-    // Client-side prediction
     local_player_id: Option<u64>,
     predicted_states: RwLock<HashMap<u64, PredictedState>>,
     pending_inputs: RwLock<VecDeque<PendingInput>>,
     
-    // Interest management
     visible_entities: RwLock<HashSet<u64>>,
-    authority_map: RwLock<HashMap<u64, u64>>, // entity -> owner
+    authority_map: RwLock<HashMap<u64, u64>>,
     
-    // Network optimization
     next_peer_id: RwLock<u64>,
     socket: Option<Arc<UdpSocket>>,
-    compression_enabled: bool,
-    delta_compression_enabled: bool,
-    prediction_enabled: bool,
+    pub compression_enabled: bool,
+    pub delta_compression_enabled: bool,
+    pub prediction_enabled: bool,
     
-    // Telemetry
     last_ping_check: Instant,
-    packet_times: RwLock<VecDeque<(Instant, u64)>>, // For RTT calculation
+    packet_times: RwLock<VecDeque<(Instant, u64)>>,
 }
 
 impl NetworkSystem {
@@ -231,11 +276,9 @@ impl NetworkSystem {
         socket.set_nonblocking(true)
             .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
         
-        // Store socket in a shared reference
         let shared_socket = Arc::new(socket);
         self.socket = Some(shared_socket.clone());
         
-        // Connect to target
         shared_socket.connect(addr)
             .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
         
@@ -249,7 +292,7 @@ impl NetworkSystem {
         connections.insert(peer_id, Connection::new(peer_id, addr));
         connections.get_mut(&peer_id).unwrap().state = ConnectionState::Connected;
         
-        info!("Connected to {} with peer_id {}", address, peer_id);
+        log::info!("Connected to {} with peer_id {}", address, peer_id);
         Ok(peer_id)
     }
 
@@ -259,21 +302,17 @@ impl NetworkSystem {
             conn.state = ConnectionState::Disconnecting;
         }
         
-        // Clean up prediction state
         self.predicted_states.write().remove(&peer_id);
         
-        // Clean up pending inputs
         let mut pending = self.pending_inputs.write();
         pending.retain(|p| p.input.player_id != peer_id as u64);
     }
 
     // ============================================
-    // MESSAGE SENDING WITH PACKET BATCHING
+    // MESSAGING
     // ============================================
 
-    /// Send a message with optional delta compression
     pub fn send_message(&self, peer_id: u64, mut message: NetworkMessage) {
-        // Compress if enabled and payload is large enough
         if self.compression_enabled && message.data.len() > COMPRESSION_THRESHOLD {
             message.data = compress_data(&message.data);
         }
@@ -286,7 +325,6 @@ impl NetworkSystem {
         }
     }
 
-    /// Send unreliable position update (optimized path)
     pub fn send_unreliable_position(&self, peer_id: u64, entity_id: u64, position: [f32; 3], sequence: u32) {
         let update = PositionUpdate {
             entity_id,
@@ -307,25 +345,21 @@ impl NetworkSystem {
         self.send_message(peer_id, message);
     }
 
-    /// Batch multiple messages into a single packet
     pub fn flush_batch(&self) -> Option<Vec<u8>> {
         let mut batch = Vec::with_capacity(MAX_PACKET_SIZE);
         
-        // Find connections with pending messages
         let mut connections = self.connections.write();
         for (peer_id, conn) in connections.iter_mut() {
             if conn.send_queue.is_empty() {
                 continue;
             }
             
-            // Collect messages until we hit MTU limit
             while let Some(msg) = conn.send_queue.pop_front() {
                 if batch.len() + msg.data.len() + PACKET_HEADER_SIZE > MAX_PACKET_SIZE {
-                    conn.send_queue.push_front(msg); // Put it back
+                    conn.send_queue.push_front(msg);
                     break;
                 }
                 
-                // Write header
                 let header = PacketHeader {
                     peer_id: *peer_id,
                     channel: msg.channel,
@@ -346,17 +380,14 @@ impl NetworkSystem {
     // CLIENT-SIDE PREDICTION
     // ============================================
 
-    /// Queue input for prediction and server submission
     pub fn queue_input(&mut self, input: GameInput) {
         let mut buffer = self.input_buffer.write();
         buffer.push_back(input.clone());
         
-        // Keep only recent inputs
         while buffer.len() > INPUT_BUFFER_SIZE {
             buffer.pop_front();
         }
         
-        // Add to pending for acknowledgment
         if self.prediction_enabled {
             let mut pending = self.pending_inputs.write();
             pending.push_back(PendingInput {
@@ -367,22 +398,19 @@ impl NetworkSystem {
         }
     }
 
-    /// Apply local prediction immediately (reduces perceived latency)
     pub fn apply_local_prediction(&mut self, player_id: u64, input: &GameInput, physics_step: impl Fn([f32; 3], &[u8]) -> ([f32; 3], [f32; 3])) {
         if !self.prediction_enabled { return; }
         
         let mut predicted = self.predicted_states.write();
         
-        // Get current predicted state or create new
         let current = predicted.get(&player_id).cloned().unwrap_or(PredictedState {
             frame: input.frame,
-            position: [0.0, 0.0, 0.0],
-            velocity: [0.0, 0.0, 0.0],
-            rotation: [0.0, 0.0, 0.0, 1.0],
+            position: [0.0; 3],
+            velocity: [0.0; 3],
+            rotation: [0.0; 0.0; 0.0; 1.0],
             input_sequence: 0,
         });
         
-        // Apply input to predict next state
         let (new_pos, new_vel) = physics_step(current.position, &input.inputs);
         
         predicted.insert(player_id, PredictedState {
@@ -394,21 +422,18 @@ impl NetworkSystem {
         });
     }
 
-    /// Reconcile with server state when acknowledgment received
     pub fn reconcile(&mut self, player_id: u64, server_frame: u32, server_position: [f32; 3]) {
         let mut pending = self.pending_inputs.write();
         let mut predicted = self.predicted_states.write();
         
-        // Find and mark acknowledged inputs
         for pending_input in pending.iter_mut() {
             if pending_input.input.frame <= server_frame {
                 pending_input.acknowledged = true;
             }
         }
         
-        // Check if prediction diverged
         if let Some(current) = predicted.get(&player_id) {
-            let tolerance = 0.01; // 1cm tolerance
+            let tolerance = 0.01;
             let diff = f32::sqrt(
                 (server_position[0] - current.position[0]).powi(2) +
                 (server_position[1] - current.position[1]).powi(2) +
@@ -416,8 +441,7 @@ impl NetworkSystem {
             );
             
             if diff > tolerance {
-                warn!("Prediction divergence detected: {} > {}", diff, tolerance);
-                // Snap to server state (or smooth interpolate)
+                log::warn!("Prediction divergence: {} > {}", diff, tolerance);
                 predicted.insert(player_id, PredictedState {
                     frame: server_frame,
                     position: server_position,
@@ -426,30 +450,25 @@ impl NetworkSystem {
                     input_sequence: server_frame,
                 });
                 
-                // Trigger re-simulation of unacknowledged inputs
                 self.resimulate_from_frame(player_id, server_frame + 1);
             }
         }
     }
 
-    /// Re-simulate from a specific frame with corrected inputs
     fn resimulate_from_frame(&mut self, player_id: u64, from_frame: u32) {
         let pending = self.pending_inputs.read();
         let mut predicted = self.predicted_states.write();
         
-        // Find unacknowledged inputs
         let unacked: Vec<&GameInput> = pending.iter()
             .filter(|p| !p.acknowledged && p.input.frame >= from_frame)
             .map(|p| &p.input)
             .collect();
         
-        // Re-simulate each input (would integrate with physics engine)
         let mut current_pos = predicted.get(&player_id)
             .map(|p| p.position)
             .unwrap_or([0.0; 3]);
         
         for input in unacked {
-            // Placeholder: actual physics simulation would go here
             current_pos[0] += 0.016 * input.inputs.first().map(|&b| b as f32 * 0.1).unwrap_or(0.0);
         }
         
@@ -457,29 +476,26 @@ impl NetworkSystem {
             frame: from_frame + unacked.len() as u32,
             position: current_pos,
             velocity: [0.0; 3],
-            rotation: [0.0, 0.0, 0.0, 1.0],
+            rotation: [0.0; 0.0; 0.0; 1.0],
             input_sequence: from_frame + unacked.len() as u32,
         });
     }
 
     // ============================================
-    // INTEREST MANAGEMENT (Reduce bandwidth)
+    // INTEREST MANAGEMENT
     // ============================================
 
-    /// Set which entities this client is interested in
     pub fn set_visible_entities(&mut self, entities: HashSet<u64>) {
         *self.visible_entities.write() = entities;
     }
 
-    /// Only replicate entities in visible set
     pub fn should_replicate_entity(&self, entity_id: u64) -> bool {
         if self.role == NetworkRole::Server {
-            return true; // Server replicates all
+            return true;
         }
         self.visible_entities.read().contains(&entity_id)
     }
 
-    /// Register entity for replication with interest tracking
     pub fn register_replicated_entity(&mut self, entity_id: u64, initial_state: Vec<u8>, owner: Option<u64>) {
         let state = ReplicatedState {
             entity_id,
@@ -497,15 +513,12 @@ impl NetworkSystem {
         }
     }
 
-    /// Update with delta compression
     pub fn update_entity_state(&mut self, entity_id: u64, new_state: Vec<u8>) {
         let mut entities = self.replicated_entities.write();
         if let Some(state) = entities.get_mut(&entity_id) {
-            let prev_seq = state.sequence_number;
             state.sequence_number += 1;
             state.timestamp = current_timestamp_ms();
             
-            // Delta compression
             if self.delta_compression_enabled {
                 let mut contexts = self.delta_contexts.write();
                 let ctx = contexts.entry(entity_id).or_default();
@@ -515,8 +528,6 @@ impl NetworkSystem {
                         state.state_data = delta;
                         state.delta_from = ctx.last_sequence;
                         state.is_delta = true;
-                        
-                        // Store full state for next delta
                         ctx.last_state = Some(new_state);
                         ctx.last_sequence = state.sequence_number;
                         return;
@@ -532,35 +543,13 @@ impl NetworkSystem {
         }
     }
 
-    /// Reconstruct state from delta
-    pub fn reconstruct_state(&self, entity_id: u64, base_state: &[u8]) -> Option<Vec<u8>> {
-        if !self.delta_compression_enabled {
-            return self.replicated_entities.read().get(&entity_id).map(|s| s.state_data.clone());
-        }
-        
-        let entities = self.replicated_entities.read();
-        if let Some(state) = entities.get(&entity_id) {
-            if state.is_delta {
-                // Would need full state history for reconstruction
-                // For simplicity, return delta and let caller handle
-                Some(state.state_data.clone())
-            } else {
-                Some(state.state_data.clone())
-            }
-        } else {
-            None
-        }
-    }
-
     // ============================================
     // ROLLBACK NETCODE
     // ============================================
 
-    /// Save state for potential rollback
     pub fn save_state(&mut self, frame: u32, state_hash: u32) {
         let mut states = self.rollback_states.write();
         
-        // Keep rolling window of states
         while states.len() >= STATE_BUFFER_SIZE {
             states.pop_front();
         }
@@ -579,45 +568,38 @@ impl NetworkSystem {
         });
     }
 
-    /// Rollback to a specific frame
     pub fn rollback_to(&self, frame: u32) -> Option<RollbackState> {
         let states = self.rollback_states.read();
         states.iter().find(|s| s.frame == frame).cloned()
     }
 
     // ============================================
-    // RTT AND PING CALCULATION
+    // RTT CALCULATION
     // ============================================
 
-    /// Record packet send time for RTT calculation
     pub fn record_packet_sent(&self, sequence: u64) {
         let mut times = self.packet_times.write();
         times.push_back((Instant::now(), sequence));
         
-        // Keep only recent samples
         while times.len() > 256 {
             times.pop_front();
         }
     }
 
-    /// Calculate current RTT from packet times
     pub fn calculate_rtt(&self, sequence: u64) -> Option<f32> {
         let times = self.packet_times.read();
         
-        // Find matching send time
         for (sent, seq) in times.iter().rev() {
             if *seq == sequence {
                 let elapsed = sent.elapsed().as_millis() as f32;
-                return Some(elapsed / 2.0); // One-way time
+                return Some(elapsed / 2.0);
             }
         }
         None
     }
 
-    /// Get smoothed RTT estimate
     pub fn get_smoothed_rtt(&self, peer_id: u64) -> f32 {
         if let Some(conn) = self.connections.read().get(&peer_id) {
-            // Use exponentially weighted average
             let instant_rtt = conn.rtt_ms;
             let mut times = self.packet_times.read();
             
@@ -629,7 +611,6 @@ impl NetworkSystem {
                     count += 1;
                 }
                 let avg = sum / count as f32;
-                // Blend instant and average
                 return instant_rtt * 0.3 + (avg / 2.0) * 0.7;
             }
             
@@ -639,7 +620,6 @@ impl NetworkSystem {
         }
     }
 
-    /// Update connection RTT based on recent measurements
     pub fn update_connection_rtt(&mut self, peer_id: u64) {
         let rtt = self.get_smoothed_rtt(peer_id);
         if let Some(conn) = self.connections.get_mut(&peer_id) {
@@ -655,12 +635,11 @@ impl NetworkSystem {
     pub fn set_local_player(&mut self, player_id: u64) {
         self.local_player_id = Some(player_id);
         
-        // Initialize prediction state
         self.predicted_states.write().insert(player_id, PredictedState {
             frame: 0,
             position: [0.0; 3],
             velocity: [0.0; 3],
-            rotation: [0.0, 0.0, 0.0, 1.0],
+            rotation: [0.0; 0.0; 0.0; 1.0],
             input_sequence: 0,
         });
     }
@@ -680,11 +659,6 @@ impl NetworkSystem {
             .count()
     }
 
-    // ============================================
-    // UTILITIES
-    // ============================================
-
-    /// Get network statistics
     pub fn get_stats(&self) -> NetworkStats {
         let connections = self.connections.read();
         let total_sent: u64 = connections.values().map(|c| c.bytes_sent).sum();
@@ -704,6 +678,10 @@ impl NetworkSystem {
         }
     }
 }
+
+// ============================================================================
+// SUPPORTING TYPES
+// ============================================================================
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PacketHeader {
@@ -755,13 +733,11 @@ impl std::fmt::Display for NetworkError {
     }
 }
 
-// ============================================
+// ============================================================================
 // COMPRESSION UTILITIES
-// ============================================
+// ============================================================================
 
 fn compress_data(data: &[u8]) -> Vec<u8> {
-    // Simple run-length encoding for demonstration
-    // In production, use lz4 or zstd
     let mut compressed = Vec::with_capacity(data.len());
     let mut i = 0;
     
@@ -774,7 +750,7 @@ fn compress_data(data: &[u8]) -> Vec<u8> {
         }
         
         if count > 3 {
-            compressed.push(0xFF); // Escape byte
+            compressed.push(0xFF);
             compressed.push(byte);
             compressed.push(count as u8);
         } else {
@@ -791,14 +767,14 @@ fn compress_data(data: &[u8]) -> Vec<u8> {
 
 fn compute_delta(old: &[u8], new: &[u8]) -> Option<Vec<u8>> {
     if new.len() > old.len() {
-        return None; // Delta would be larger than full data
+        return None;
     }
     
     let mut delta = Vec::with_capacity(new.len());
     for (i, (o, n)) in old.iter().zip(new.iter()).enumerate() {
         if *o != *n {
-            delta.push(i as u8); // Position
-            delta.push(*n); // New value
+            delta.push(i as u8);
+            delta.push(*n);
         }
     }
     
@@ -816,8 +792,6 @@ fn current_timestamp_ms() -> u64 {
         .unwrap_or(0)
 }
 
-use log::{info, warn};
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -830,6 +804,13 @@ mod tests {
         if let Some(delta) = compute_delta(&old, &new) {
             assert!(delta.len() < new.len());
         }
+    }
+
+    #[test]
+    fn test_entity_snapshot() {
+        let entity = EntitySnapshot::new(1, Vec3::new(0.0, 0.0, 0.0), Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0));
+        assert_eq!(entity.id, 1);
+        assert_eq!(entity.center(), Vec3::ZERO);
     }
 
     #[test]

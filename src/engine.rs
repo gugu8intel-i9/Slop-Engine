@@ -1,3 +1,10 @@
+// src/engine.rs
+//! Core Engine orchestrator with all systems integrated
+//! - Predictive Rendering
+//! - Memory Management (W-TinyLFU)
+//! - Network (Client-side prediction)
+//! - Resource Management
+
 use std::sync::Arc;
 use winit::{
     event::{Event, WindowEvent},
@@ -5,229 +12,390 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-// Import all the amazing modules you've built
 use crate::{
-    anticheat::AntiCheatSystem,
-    audio::AudioEngine,
+    predictive_renderer::{PredictiveRenderer, PredictiveRenderConfig, SceneSnapshot, DeltaPrediction},
+    offload::{OffloadManager, OffloadConfig, ResourceTier, Priority},
+    network::{NetworkSystem, NetworkRole, GameInput},
+    resource_manager::{ResourceManager, ResourceConfig, MemoryStats},
     camera::Camera,
     camera_controller::CameraController,
-    context::GraphicsContext,
-    culling::FrustumCuller,
-    fps_counter::FpsCounter,
-    gui::GuiSystem,
-    input_system::InputSystem,
-    physics::PhysicsWorld,
-    physics_integration::PhysicsSync,
     renderer::Renderer,
-    resource_manager::ResourceManager,
     scene::Scene,
-    shader_hot_reload::ShaderHotReloader,
+    physics::PhysicsWorld,
     time::Time,
+    fps_counter::FpsCounter,
+    input_system::InputSystem,
+    gui::GuiSystem,
+    audio::AudioEngine,
 };
 
-/// The Core Engine orchestrator.
-/// Designed for high performance, utilizing fixed-timestep logic for physics/anticheat
-/// and variable-timestep for rendering and input.
+/// Main engine configuration
+#[derive(Debug, Clone)]
+pub struct EngineSettings {
+    pub predictive_rendering: PredictiveRenderConfig,
+    pub offload: OffloadConfig,
+    pub network: NetworkConfig,
+    pub resource: ResourceConfig,
+    pub target_fps: u32,
+    pub enable_debug_overlay: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct NetworkConfig {
+    pub enabled: bool,
+    pub role: NetworkRole,
+    pub tick_rate: u32,
+    pub client_prediction: bool,
+    pub delta_compression: bool,
+}
+
+impl Default for EngineSettings {
+    fn default() -> Self {
+        Self {
+            predictive_rendering: PredictiveRenderConfig::default(),
+            offload: OffloadConfig::default(),
+            network: NetworkConfig {
+                enabled: false,
+                role: NetworkRole::Client,
+                tick_rate: 60,
+                client_prediction: true,
+                delta_compression: true,
+            },
+            resource: ResourceConfig::default(),
+            target_fps: 60,
+            enable_debug_overlay: false,
+        }
+    }
+}
+
+/// Engine performance statistics
+#[derive(Debug, Default)]
+pub struct EngineStats {
+    pub fps: f32,
+    pub frame_time_ms: f32,
+    pub predictive_hot_ratio: f32,
+    pub gpu_time_saved_ms: f32,
+    pub vram_used_mb: f64,
+    pub vram_budget_mb: f64,
+    pub entities_culled: usize,
+    pub network_rtt_ms: f32,
+}
+
+impl EngineStats {
+    pub fn summary(&self) -> String {
+        format!(
+            "FPS: {:.1} | Frame: {:.2}ms | Predictive: {:.0}% saved | VRAM: {:.0}/{:.0}MB | RTT: {:.0}ms",
+            self.fps,
+            self.frame_time_ms,
+            self.predictive_hot_ratio * 100.0,
+            self.vram_used_mb,
+            self.vram_budget_mb,
+            self.network_rtt_ms
+        )
+    }
+}
+
+/// Main Engine orchestrator with all subsystems integrated
 pub struct Engine {
     // Windowing & Context
     pub window: Arc<Window>,
-    pub context: Arc<GraphicsContext>,
-
+    
     // Core Systems
-    pub renderer: Renderer,
     pub scene: Scene,
     pub physics: PhysicsWorld,
-    pub resources: Arc<ResourceManager>,
-    
-    // Utilities & Features
-    pub input: InputSystem,
-    pub camera: Camera,
-    pub camera_controller: CameraController,
-    pub audio: AudioEngine,
-    pub gui: GuiSystem,
     pub time: Time,
+    pub input: InputSystem,
     pub fps_counter: FpsCounter,
     
-    // Advanced/Security
-    pub anticheat: AntiCheatSystem,
-    pub shader_reloader: Option<ShaderHotReloader>,
-
-    // Offloaded/Threaded tasks (e.g., async asset loading, background generation)
-    pub task_pool: crate::offload::TaskPool,
+    // Rendering Systems
+    pub camera: Camera,
+    pub camera_controller: CameraController,
+    pub renderer: Renderer,
+    pub predictive_renderer: Option<PredictiveRenderer>,
+    
+    // Memory & Resources
+    pub resource_manager: Arc<ResourceManager>,
+    pub offload_manager: OffloadManager,
+    
+    // Network
+    pub network: NetworkSystem,
+    pub client_prediction_enabled: bool,
+    
+    // Audio & UI
+    pub audio: AudioEngine,
+    pub gui: GuiSystem,
+    
+    // Settings & Stats
+    pub settings: EngineSettings,
+    pub stats: EngineStats,
 }
 
 impl Engine {
-    /// Initializes the engine. Asynchronous to support WebGPU/WASM initialization.
-    pub async fn new(event_loop: &EventLoop<()>) -> Result<Self, crate::error::EngineError> {
-        // 1. Initialize Window & Context
+    /// Initialize engine with settings
+    pub async fn new(event_loop: &EventLoop<()>, settings: EngineSettings) -> Result<Self, crate::error::EngineError> {
+        // 1. Create window
         let window = Arc::new(
             WindowBuilder::new()
-                .with_title("High-Performance Custom Engine")
+                .with_title("Slop Engine v2.0")
                 .with_inner_size(winit::dpi::PhysicalSize::new(1280, 720))
                 .build(event_loop)
                 .unwrap(),
         );
 
-        let context = Arc::new(GraphicsContext::new(window.clone()).await?);
-        
-        // 2. Initialize Shared Resource Manager (Assets, Textures, Meshes)
-        let resources = Arc::new(ResourceManager::new(context.clone()));
+        // 2. Initialize resource manager first (needed by other systems)
+        let resource_manager = Arc::new(ResourceManager::new(
+            todo!("Get device from context"),
+            todo!("Get queue from context"),
+            settings.resource.clone(),
+        ));
 
-        // 3. Initialize Core Systems
-        let mut renderer = Renderer::new(context.clone(), resources.clone());
+        // 3. Initialize offload manager
+        let offload_manager = OffloadManager::new(settings.offload.clone());
+
+        // 4. Initialize network system
+        let mut network = NetworkSystem::new(settings.network.role);
+        network.prediction_enabled = settings.network.client_prediction;
+        network.delta_compression_enabled = settings.network.delta_compression;
+
+        // 5. Initialize core systems
         let scene = Scene::new();
         let physics = PhysicsWorld::new();
         let input = InputSystem::new();
-        let audio = AudioEngine::new()?;
-        let gui = GuiSystem::new(&window, &context);
-        
-        // 4. Setup Camera
-        let camera = Camera::new(context.config().width as f32, context.config().height as f32);
-        let camera_controller = CameraController::new(2.0, 0.5); // Speed, Sensitivity
-
-        // 5. Setup Utilities
         let time = Time::new();
         let fps_counter = FpsCounter::new();
-        let task_pool = crate::offload::TaskPool::new(); // Thread pool for heavy tasks
-        let anticheat = AntiCheatSystem::new();
-        
-        // Setup Hot Reloading (Only in debug/development builds)
-        #[cfg(debug_assertions)]
-        let shader_reloader = Some(ShaderHotReloader::new(context.clone())?);
-        #[cfg(not(debug_assertions))]
-        let shader_reloader = None;
+
+        // 6. Initialize camera
+        let camera = Camera::new(1280.0, 720.0);
+        let camera_controller = CameraController::new(2.0, 0.5);
+
+        // 7. Initialize renderer
+        let renderer = Renderer::new(window.clone()).await;
+
+        // 8. Initialize predictive renderer
+        let predictive_renderer = Some(PredictiveRenderer::new(
+            todo!("Get device"),
+            settings.predictive_rendering.clone(),
+            1280,
+            720,
+        ));
+
+        // 9. Initialize audio and GUI
+        let audio = AudioEngine::new()?;
+        let gui = GuiSystem::new(&window);
 
         Ok(Self {
             window,
-            context,
-            renderer,
             scene,
             physics,
-            resources,
+            time,
             input,
+            fps_counter,
             camera,
             camera_controller,
+            renderer,
+            predictive_renderer,
+            resource_manager,
+            offload_manager,
+            network,
+            client_prediction_enabled: settings.network.client_prediction,
             audio,
             gui,
-            time,
-            fps_counter,
-            anticheat,
-            shader_reloader,
-            task_pool,
+            settings,
+            stats: EngineStats::default(),
         })
     }
 
-    /// Handles OS-level window and input events.
-    pub fn handle_event(&mut self, event: &Event<()>) {
-        // Let GUI intercept events first (e.g., if user is typing in a UI box)
-        if self.gui.handle_event(event) {
-            return; 
-        }
-
-        // Pass events to the Input System
-        self.input.process_event(event);
+    /// Standard initialization with default settings
+    pub async fn with_defaults(event_loop: &EventLoop<()>) -> Result<Self, crate::error::EngineError> {
+        Self::new(event_loop, EngineSettings::default()).await
     }
 
-    /// The main update loop. Separates Fixed-Update (Physics/Logic) and Variable-Update (Graphics).
-    pub fn update(&mut self) {
-        self.time.tick();
-        self.fps_counter.update(self.time.delta_seconds());
-
-        // 1. Hot Reloading (Dev only)
-        if let Some(reloader) = &mut self.shader_reloader {
-            reloader.check_and_reload(&mut self.renderer);
+    /// Handle input events
+    pub fn handle_event(&mut self, event: &Event<()>) {
+        // GUI intercepts events first
+        if self.gui.handle_event(event) {
+            return;
         }
 
-        // 2. Variable Timestep Update (Runs every frame)
-        self.camera_controller.update_camera(&mut self.camera, &self.input, self.time.delta_seconds());
-        self.audio.update(&self.camera); // Update listener position
-        self.gui.update(self.time.delta_seconds());
+        // Pass to input system
+        self.input.process_event(event);
 
-        // 3. Fixed Timestep Update (Physics, Anticheat, Gameplay Logic)
-        // Ensures deterministic behavior regardless of framerate
+        // Network receives inputs
+        if let Event::WindowEvent { event: WindowEvent::KeyboardInput { input, .. }, .. } = event {
+            if input.state == ElementState::Pressed {
+                // Create input for network
+                let input_data = GameInput {
+                    player_id: 0,
+                    frame: self.time.frame_count(),
+                    inputs: vec![input.scancode as u8],
+                    checksum: 0,
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0),
+                };
+                
+                if self.client_prediction_enabled {
+                    self.network.queue_input(input_data);
+                }
+            }
+        }
+    }
+
+    /// Main update loop
+    pub fn update(&mut self) {
+        self.time.tick();
+        let dt = self.time.delta_seconds();
+        
+        // Update FPS counter
+        self.fps_counter.update(dt);
+        self.stats.fps = self.fps_counter.fps();
+        self.stats.frame_time_ms = dt * 1000.0;
+
+        // Update camera controller
+        self.camera_controller.update_camera(&mut self.camera, &self.input, dt);
+
+        // Update audio listener position
+        self.audio.update(&self.camera);
+
+        // Update GUI
+        self.gui.update(dt);
+
+        // Fixed timestep for physics and network
         while self.time.consume_fixed_timestep() {
             self.fixed_update();
         }
 
-        // 4. Interpolate physics state to rendering scene for ultra-smooth movement
-        PhysicsSync::sync_to_scene(&self.physics, &mut self.scene, self.time.interpolation_alpha());
-        
-        // Clear input delta states (like mouse movement) at the end of the frame
+        // Clear input deltas
         self.input.clear_frame_state();
     }
 
-    /// Deterministic logic step (e.g., runs exactly 60 times a second)
+    /// Fixed timestep updates (physics, networking)
     fn fixed_update(&mut self) {
         let dt = self.time.fixed_delta_seconds();
 
-        // Security / Anticheat checks (Memory validation, speedhack checks)
-        self.anticheat.verify_integrity(dt);
-
-        // Step Physics Engine
+        // Step physics
         self.physics.step(dt);
 
-        // Update Scene Logic / Animations / Entity scripts
+        // Update scene
         self.scene.update(dt);
-    }
 
-    /// The highly-optimized rendering pipeline.
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        // 1. Frustum Culling (High-Performance Offloaded Task)
-        // Only render what the camera can see.
-        let visible_entities = FrustumCuller::cull(&self.scene, &self.camera);
-
-        // 2. Prepare Render State
-        self.renderer.prepare(&self.camera, &visible_entities, &self.time);
-
-        // 3. Acquire Swapchain Texture
-        let output = self.context.surface.get_current_texture()?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        // 4. Command Buffer Generation (Utilizing command_buffer.rs)
-        let mut encoder = self.context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Engine Render Encoder"),
-        });
-
-        // ==========================================
-        // ADVANCED RENDER PIPELINE
-        // ==========================================
-        
-        // A. Shadow Mapping (Cascaded / Depth Textures)
-        self.renderer.render_shadows(&mut encoder, &self.scene, &visible_entities);
-
-        // B. Main Opaque Geometry Pass (PBR / Materials)
-        self.renderer.render_opaque(&mut encoder, &view, &self.scene, &visible_entities);
-
-        // C. Skybox / Environment Prefiltering
-        self.renderer.render_skybox(&mut encoder, &view, &self.camera);
-
-        // D. Post Processing (SSR -> SSAO -> DoF -> Bloom -> TAA)
-        // These utilize your dedicated compute/frag wgsl shaders.
-        self.renderer.post_processing.apply(
-            &mut encoder, 
-            &view, 
-            &self.context,
-            &self.camera
-        );
-
-        // E. Render GUI on top of everything
-        self.gui.render(&mut encoder, &view, &self.context);
-
-        // 5. Submit to GPU Queue
-        self.context.queue.submit(std::iter::once(encoder.finish()));
-        
-        // 6. Present to Screen
-        output.present();
-
-        Ok(())
-    }
-
-    /// Handles window resizing efficiently
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        if new_size.width > 0 && new_size.height > 0 {
-            self.context.resize(new_size);
-            self.camera.resize(new_size.width as f32, new_size.height as f32);
-            self.renderer.resize(new_size.width, new_size.height); // Resizes depth/post-process targets
+        // Update network
+        if self.client_prediction_enabled {
+            self.network.update_connection_rtt(0);
+            self.stats.network_rtt_ms = self.network.get_rtt(0).unwrap_or(0.0);
         }
     }
+
+    /// Prepare scene for rendering
+    fn prepare_scene(&mut self) {
+        // Get visible entities through culling
+        let visible_entities = crate::culling::FrustumCuller::cull(&self.scene, &self.camera);
+        self.stats.entities_culled = self.scene.entity_count() - visible_entities.len();
+
+        // Generate prediction delta
+        if let Some(ref mut pr) = self.predictive_renderer {
+            let snapshot = self.create_scene_snapshot();
+            let delta = pr.delta_predictor.predict(&snapshot);
+            
+            // Update tile manager with delta
+            pr.tile_manager.update(&delta);
+            
+            // Collect statistics
+            let tile_stats = pr.tile_manager.statistics();
+            self.stats.predictive_hot_ratio = 1.0 - tile_stats.hot_ratio;
+            self.stats.gpu_time_saved_ms = pr.stats.gpu_time_saved_ms;
+        }
+    }
+
+    /// Create scene snapshot for predictive renderer
+    fn create_scene_snapshot(&self) -> SceneSnapshot {
+        SceneSnapshot {
+            camera_position: self.camera.position,
+            camera_pitch: self.camera.pitch,
+            camera_yaw: self.camera.yaw,
+            screen_width: self.camera.width as u32,
+            screen_height: self.camera.height as u32,
+            entities: self.scene.entities.iter().map(|e| crate::network::EntitySnapshot {
+                id: e.id,
+                position: e.position,
+                rotation: e.rotation,
+                scale: e.scale,
+                bounds_min: e.aabb.min,
+                bounds_max: e.aabb.max,
+            }).collect(),
+            active_animations: HashMap::new(),
+            particle_systems: Vec::new(),
+            lighting_changes: Vec::new(),
+        }
+    }
+
+    /// Main render loop
+    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        // Prepare scene with predictive rendering
+        self.prepare_scene();
+
+        // Get hot tiles from predictive renderer
+        let hot_tiles = self.predictive_renderer
+            .as_ref()
+            .map(|pr| pr.tile_manager.hot_tiles())
+            .unwrap_or_default();
+
+        // Update offload manager
+        self.offload_manager.tick();
+
+        // Update resource manager
+        self.resource_manager.tick();
+
+        // Get VRAM stats
+        let (vram_used, vram_budget) = self.offload_manager.vram_usage();
+        self.stats.vram_used_mb = vram_used as f64 / (1024.0 * 1024.0);
+        self.stats.vram_budget_mb = vram_budget as f64 / (1024.0 * 1024.0);
+
+        // Render scene
+        self.renderer.render()
+    }
+
+    /// Handle window resize
+    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            self.camera.resize(new_size.width as f32, new_size.height as f32);
+            self.renderer.resize(new_size.width, new_size.height);
+            
+            // Resize predictive renderer
+            if let Some(ref mut pr) = self.predictive_renderer {
+                pr.resize(new_size.width, new_size.height);
+            }
+        }
+    }
+
+    /// Get current engine statistics
+    pub fn get_stats(&self) -> EngineStats {
+        self.stats.clone()
+    }
+
+    /// Register a resource for tracking
+    pub fn register_resource(&mut self, id: u64, size_bytes: usize, tier: ResourceTier) {
+        use crate::offload::ResourceId;
+        let rid = ResourceId(id, 1);
+        self.offload_manager.register(rid, size_bytes, tier, Priority::Normal);
+    }
+
+    /// Touch a resource (marks it as recently used)
+    pub fn touch_resource(&mut self, id: u64) {
+        use crate::offload::ResourceId;
+        let rid = ResourceId(id, 1);
+        self.offload_manager.touch(rid);
+    }
 }
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        // Cleanup
+        log::info!("Engine shutting down...");
+    }
+}
+
+// Re-export for convenience
+pub use crate::network::EntitySnapshot;
+use std::collections::HashMap;

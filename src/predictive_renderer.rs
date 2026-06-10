@@ -395,6 +395,9 @@ impl DeltaPredictor {
 // SCENE SNAPSHOT (Data from main engine)
 // ============================================================================
 
+// Re-export EntitySnapshot from network module for compatibility
+pub use crate::network::EntitySnapshot;
+
 #[derive(Debug)]
 pub struct SceneSnapshot {
     pub camera_position: Vec3,
@@ -406,16 +409,6 @@ pub struct SceneSnapshot {
     pub active_animations: HashMap<u64, AnimationSnapshot>,
     pub particle_systems: Vec<ParticleSystemSnapshot>,
     pub lighting_changes: Vec<LightChange>,
-}
-
-#[derive(Debug, Clone)]
-pub struct EntitySnapshot {
-    pub id: u64,
-    pub position: Vec3,
-    pub rotation: Vec3,
-    pub scale: Vec3,
-    pub bounds_min: Vec3,
-    pub bounds_max: Vec3,
 }
 
 #[derive(Debug, Clone)]
