@@ -1,5 +1,5 @@
 {
-  "_comment": "High-performance settings for Slop Engine",
+  "_comment": "OPTIMIZED: High-performance settings for Slop Engine v2.0",
 
   "window": {
     "title": "My Game",
@@ -8,64 +8,111 @@
     "fullscreen": false,
     "vsync": true,
     "resizable": true,
-    "maximized": false
+    "maximized": false,
+    "borderless": false,
+    "minimized_on_focus_lost": true,
+    "allow_highdpi": true
   },
 
   "rendering": {
     "quality_preset": "high",
     "target_frame_rate": 60,
     "resolution_scale": 1.0,
+    
     "anti_aliasing": {
       "enabled": true,
       "mode": "taa",
       "taa": {
-        "jitter_scale": 1.0,
+        "jitter_scale": 0.5,
         "sample_count": 4,
         "sharpness": 0.5
+      },
+      "fxaa": {
+        "enabled": false,
+        "quality": "high"
       }
     },
+    
     "culling": {
       "frustum_culling": true,
-      "occlusion_culling": false,
-      "hierarchical_z": false
+      "occlusion_culling": true,
+      "hierarchical_z": true,
+      "distance_culling": true,
+      "distance_culling_max": 500.0,
+      "lod_culling": true
     },
+    
+    "lod": {
+      "levels": 4,
+      "distance_thresholds": [50.0, 150.0, 350.0, 500.0],
+      "auto_switch_enabled": true,
+      "morph_time_ms": 100
+    },
+    
+    "dynamic_resolution": {
+      "enabled": true,
+      "min_scale": 0.5,
+      "max_scale": 1.0,
+      "target_fps_threshold": 30,
+      "recovery_rate": 0.1,
+      "drop_rate": 0.2
+    },
+    
     "wireframe": false,
-    "debug_overlay": false
+    "debug_overlay": false,
+    
+    "instancing": {
+      "enabled": true,
+      "max_instances_per_draw": 1024,
+      "static_only": true
+    },
+    
+    "variable_rate_shading": {
+      "enabled": false,
+      "tile_size": 16,
+      "center_quality": 1.0,
+      "edge_quality": 0.5
+    }
   },
 
   "shadows": {
     "enabled": true,
     "resolution": 2048,
     "soft_shadows": true,
-    "pcf_samples": 16,
-    "cascade_count": 4,
+    "pcf_samples": 9,
+    "cascade_count": 3,
     "cascade_split_lambda": 0.95,
     "max_distance": 100.0,
-    "shadow_map_format": "depth32float"
+    "shadow_map_format": "depth32float",
+    "bias": 0.0005,
+    "normal_offset": true,
+    "dynamic_resolution": true,
+    "only_near_lights": true
   },
 
   "post_processing": {
     "bloom": {
       "enabled": true,
-      "intensity": 1.0,
-      "radius": 0.05,
-      "threshold": 0.8,
+      "intensity": 0.8,
+      "radius": 0.04,
+      "threshold": 0.85,
       "soft_knee": 0.5,
-      "downsample_passes": 5
+      "downsample_passes": 4
     },
     "ssao": {
       "enabled": true,
-      "radius": 0.5,
+      "radius": 0.4,
       "bias": 0.025,
-      "power": 2.0,
-      "sample_count": 16,
-      "blur": true
+      "power": 1.5,
+      "sample_count": 12,
+      "blur_passes": 1,
+      "resolution_scale": 0.5
     },
     "ssr": {
       "enabled": false,
-      "max_steps": 64,
+      "max_steps": 32,
       "thickness": 0.1,
-      "screen_edge_fade": 0.1,
+      "screen_edge_fade": 0.15,
       "jitter": 0.05
     },
     "dof": {
@@ -73,7 +120,8 @@
       "focus_distance": 10.0,
       "aperture": 0.1,
       "focal_length": 50.0,
-      "blur_quality": "medium"
+      "blur_quality": "medium",
+      "max_blur_radius": 8
     },
     "motion_blur": {
       "enabled": false,
@@ -89,16 +137,29 @@
       "intensity": 0.3,
       "roundness": 0.5,
       "smoothness": 0.5
+    },
+    "color_grading": {
+      "enabled": true,
+      "temperature": 0.0,
+      "tint": 0.0,
+      "contrast": 1.0,
+      "saturation": 1.0
+    },
+    "tone_mapping": {
+      "mode": "aces",
+      "exposure": 1.0
     }
   },
 
   "lighting": {
     "max_directional_lights": 4,
-    "max_point_lights": 32,
-    "max_spot_lights": 32,
-    "ambient_intensity": 0.2,
-    "ibl_intensity": 1.0,
-    "specular_aa": true
+    "max_point_lights": 16,
+    "max_spot_lights": 16,
+    "ambient_intensity": 0.15,
+    "ibl_intensity": 0.8,
+    "specular_aa": true,
+    "clustered_forward": true,
+    "cluster_grid_size": [16, 16, 24]
   },
 
   "camera": {
@@ -110,17 +171,42 @@
       "move_speed": 5.0,
       "sprint_multiplier": 2.0,
       "invert_y": false,
-      "enable_fly_mode": true
-    }
+      "enable_fly_mode": true,
+      "smooth_camera": true,
+      "smoothing_factor": 0.1
+    },
+    "motion_blur_from_velocity": false
   },
 
   "physics": {
     "enabled": true,
     "gravity": [0.0, -9.81, 0.0],
     "fixed_timestep": 0.0166667,
-    "max_substeps": 10,
+    "max_substeps": 8,
     "debug_draw": false,
-    "broad_phase": "sweep_and_prune"
+    "broad_phase": "sweep_and_prune",
+    "sleep_enabled": true,
+    "sleep_threshold": 0.1,
+    " CCD": true,
+    "solver_iterations": 10
+  },
+
+  "network": {
+    "enabled": true,
+    "tick_rate": 60,
+    "client_prediction": true,
+    "reconciliation_threshold": 0.01,
+    "delta_compression": true,
+    "interest_management": true,
+    "cull_distant_entities": true,
+    "entity_distance_threshold": 500.0,
+    "packet_batching": true,
+    "mtu_size": 1400,
+    "compression_enabled": true,
+    "compression_threshold_bytes": 256,
+    "input_buffer_size": 128,
+    "state_buffer_size": 30,
+    "max_bandwidth_kbps": 1000
   },
 
   "input": {
@@ -158,9 +244,11 @@
     "show_physics_debug": false,
     "show_bounding_boxes": false,
     "show_light_frustums": false,
-    "log_level": "info",
+    "log_level": "warn",
     "hot_reload_shaders": true,
-    "hot_reload_assets": true
+    "hot_reload_assets": true,
+    "profile_gpu": false,
+    "profile_cpu": false
   },
 
   "performance": {
@@ -168,26 +256,108 @@
     "dynamic_resolution": false,
     "dynamic_resolution_min_scale": 0.5,
     "dynamic_resolution_max_scale": 1.0,
-    "gpu_upload_heaps": 4,
-    "texture_pool_size": 256,
-    "mesh_pool_size": 512,
-    "material_pool_size": 1024,
-    "light_pool_size": 128
+    
+    "memory": {
+      "vram_budget_mb": 512,
+      "system_ram_budget_mb": 1024,
+      "staging_buffer_size_mb": 32,
+      "enable_memory_pools": true,
+      "pool_preallocate": true,
+      "pool_fragmentation_threshold": 0.2
+    },
+    
+    "threading": {
+      "worker_threads": 4,
+      "async_asset_loading": true,
+      "parallel_rendering": true,
+      "job_system_enabled": true,
+      "job_batch_size": 64
+    },
+    
+    "gpu": {
+      "upload_heaps": 2,
+      "use_compute_for_mipmaps": true,
+      "texture_streaming": true,
+      "max_loaded_textures_mb": 256
+    },
+    
+    "pools": {
+      "texture_pool_size": 128,
+      "mesh_pool_size": 256,
+      "material_pool_size": 512,
+      "light_pool_size": 64,
+      "particle_pool_size": 8192
+    }
   },
 
   "assets": {
     "texture_compression": "bc7",
     "generate_mipmaps": true,
     "anisotropy_level": 16,
-    "max_texture_size": 4096,
+    "max_texture_size": 2048,
     "load_async": true,
-    "cache_size_mb": 512
+    "cache_size_mb": 512,
+    "stream_in_background": true,
+    "evict_unused_after_seconds": 30,
+    "atlas_small_textures": true,
+    "atlas_max_size": 2048,
+    "atlas_area_threshold": 256
+  },
+
+  "audio": {
+    "max_concurrent_sources": 64,
+    "spatial_enabled": true,
+    "occlusion_enabled": false,
+    "reverb_enabled": false,
+    "compression_enabled": true,
+    "quality": "high",
+    "voice_stealing": true,
+    "distance_model": "inverse",
+    "doppler_factor": 1.0
   },
 
   "shaders": {
     "shader_model": "wgsl",
     "enable_validation": false,
     "optimization_level": 3,
-    "debug_symbols": false
+    "debug_symbols": false,
+    "inline_shaders": true,
+    "cache_compiled": true
+  },
+
+  "presets": {
+    "ultra": {
+      "resolution_scale": 1.0,
+      "shadow_resolution": 4096,
+      "shadow_cascade_count": 4,
+      "ssao_samples": 16,
+      "bloom_passes": 5,
+      "post_processing_quality": "ultra"
+    },
+    "high": {
+      "resolution_scale": 1.0,
+      "shadow_resolution": 2048,
+      "shadow_cascade_count": 3,
+      "ssao_samples": 12,
+      "bloom_passes": 4,
+      "post_processing_quality": "high"
+    },
+    "medium": {
+      "resolution_scale": 0.75,
+      "shadow_resolution": 1024,
+      "shadow_cascade_count": 2,
+      "ssao_samples": 8,
+      "bloom_passes": 3,
+      "post_processing_quality": "medium",
+      "ssr_enabled": false
+    },
+    "low": {
+      "resolution_scale": 0.5,
+      "shadow_resolution": 512,
+      "shadow_cascade_count": 1,
+      "ssao_enabled": false,
+      "bloom_enabled": false,
+      "post_processing_quality": "low"
+    }
   }
 }

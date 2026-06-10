@@ -41,7 +41,7 @@ lru = "0.16.3"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 log = "0.4"
 rayon = "1.10"
-smallvec = "1.13"
+smallvec = { version = "1.13", features = ["union", "manually_drop"] }
 blake3 = "1.5"
 digest = "0.10"
 
@@ -57,6 +57,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 # -----------------------------------
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+bincode = "1.3"  # Fast binary serialization for network compression
 thiserror = "1.0"
 rand = "0.8"
 sha2 = "0.10"
@@ -65,6 +66,14 @@ aes-gcm = "0.10"
 sysinfo = "0.30"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+ahash = "0.8"  # Faster hash maps for ECS and resource management
+dashmap = "5.5"  # Lock-free concurrent hash map
+
+# -----------------------------------
+# Optional: Extra optimization
+# -----------------------------------
+flume = "0.11"  # High-performance channel implementation
+parking_lot_core = "0.9"  # Explicit dependency for faster parking_lot operations
 
 # ===================================
 # Native-Only Dependencies (Windows/Mac/Linux)
@@ -75,20 +84,22 @@ env_logger = "0.11"
 notify = "6.1"
 pollster = "0.3"
 crossbeam = "0.8"
+crossbeam-queue = "0.3"  # SegQueue for lock-free queuing
 fxhash = "0.2"
+memmap2 = "0.9"  # Memory-mapped files for asset streaming
 
 # Optional High-Performance Native Crates
 mimalloc = { version = "0.1", optional = true }
 thread-priority = { version = "1.1", optional = true }
-tokio = { version = "1.37", features = ["rt-multi-thread", "time", "net"], optional = true }
+tokio = { version = "1.37", features = ["rt-multi-thread", "time", "net", "sync", "rt"], optional = true }
+
+# WASM-specific fast random
+getrandom = { version = "0.2", features = ["js"] }
 
 # ===================================
 # WASM-Only Dependencies (Web)
 # ===================================
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# Randomness required for WASM wgpu/uuid generations
-getrandom = { version = "0.2", features = ["js"] }
-
 web-sys = { version = "0.3", features = [
     "Window", "Document", "Element", "HtmlCanvasElement",
     "AudioContext", "AudioBuffer", "AudioBufferSourceNode", "GainNode",
@@ -108,11 +119,7 @@ console_log = "1.0"
 opt-level = 1
 debug = true
 split-debuginfo = "unpacked" # Faster compilation on mac/linux
-
-# 🔥 ENGINE SECRET SAUCE:
-# Compile all dependencies with max optimization even in debug mode.
-# This keeps your Physics (Rapier) and Renderer (wgpu) running at 60+ FPS
-# during development, while your own code compiles instantly.
+# Keep optimization for dependencies in debug for better FPS
 [profile.dev.package."*"]
 opt-level = 3
 
@@ -121,8 +128,15 @@ opt-level = 3
 lto = "fat" # Maximize performance across crate boundaries
 codegen-units = 1 # Slower compile, but significantly faster binary
 strip = true # Strip symbols (smaller binary size)
-# Removed `panic = "abort"` so `catch_unwind` and our crash-logger in main.rs actually work!
+panic = "abort" # Smaller binary, faster panics (uncomment if no catching panics needed)
 
-# Aggressive WASM size/speed optimizations
+[profile.release.build-override]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+# ===================================
+# WASM Optimization
+# ===================================
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = ["-O4", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
