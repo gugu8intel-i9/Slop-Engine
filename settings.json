@@ -72,6 +72,22 @@
       "tile_size": 16,
       "center_quality": 1.0,
       "edge_quality": 0.5
+    },
+    
+    "predictive_rendering": {
+      "enabled": true,
+      "tile_size": 16,
+      "max_tiles_per_frame": 512,
+      "prediction_window": 2,
+      "velocity_threshold": 0.001,
+      "animation_threshold": 0.01,
+      "frame_reuse_depth": 4,
+      "reprojection_blend": 0.85,
+      "error_threshold": 0.02,
+      "max_accumulated_error": 0.15,
+      "watchdog_check_interval": 4,
+      "debug_overlay": false,
+      "statistics_enabled": true
     }
   },
 
