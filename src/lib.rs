@@ -25,12 +25,14 @@ pub mod offload;
 pub mod network;
 pub mod resource_manager;
 pub mod tdsp_engine;
+pub mod causal_save;
 
 use predictive_renderer::*;
 use offload::{OffloadManager, OffloadConfig};
 use network::{NetworkSystem, NetworkRole};
 use resource_manager::{ResourceManager, ResourceConfig};
 use tdsp_engine::*;
+use causal_save::{CausalSaveFile, SaveManager, DeterministicRng, WorldSeed, PlayerSeed};
 
 use glam::{Vec3, vec3};
 
