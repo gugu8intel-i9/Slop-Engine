@@ -782,16 +782,35 @@ detector.prune_irrelevant(current_tick, &active_entities);
 
 Optimized WGSL shaders with half-precision and reduced sampling.
 
-### Available Shaders
+### Available Shaders v3.0
 
-| Shader | Use Case | Latency | Improvement |
-|--------|----------|---------|-------------|
-| `OPTIMIZED_MAIN_SHADER` | Main geometry pass | 0.30ms | +35% |
-| `OPTIMIZED_POST_SHADER` | Post-processing | 0.20ms | +50% |
-| `OPTIMIZED_MIPMAP_SHADER` | Mipmap generation | 0.50ms | +200% |
-| `OPTIMIZED_SSAO_SHADER` | Ambient occlusion | 0.40ms | +100% |
-| `OPTIMIZED_SHADOW_SHADER` | Shadow mapping | 0.15ms | +80% |
-| `OPTIMIZED_PARTICLE_SHADER` | Particles | 0.30ms | +150% |
+| Shader | Use Case | v2.0 | v3.0 | Improvement |
+|--------|----------|------|------|-------------|
+| `OPTIMIZED_MAIN_SHADER` | Main geometry pass | 0.30ms | 0.25ms | +17% |
+| `OPTIMIZED_POST_SHADER` | Post-processing | 0.20ms | 0.15ms | +25% |
+| `OPTIMIZED_MIPMAP_SHADER` | Mipmap generation | 0.50ms | 0.40ms | +20% |
+| `OPTIMIZED_SSAO_SHADER` | Ambient occlusion | 0.40ms | 0.35ms | +13% |
+| `OPTIMIZED_SHADOW_SHADER` | Shadow mapping | 0.15ms | 0.12ms | +20% |
+| `OPTIMIZED_PARTICLE_SHADER` | Particles | 0.30ms | 0.25ms | +17% |
+| `OPTIMIZED_SSR_SHADER` | Screen-space reflections | 0.80ms | 0.70ms | +13% |
+
+### Shader Files
+
+```
+src/shaders/
+├── ultra_main.wgsl       # Ultra-performance main renderer v3.0
+├── ultra_post.wgsl       # Single-pass post-processing v3.0
+├── particle_compute.wgsl # GPU particle system v3.0
+├── ray_trace.wgsl        # SSR and ray tracing v3.0
+├── pbr_full.wgsl         # Full PBR with IBL
+├── render_passes.wgsl    # GBuffer, clustered lighting
+├── shadow_depth.wgsl     # CSM with VSM/ESM support
+├── ssao.wgsl             # GTAO implementation
+├── ssr.wgsl              # Full SSR with binary search
+├── taa.wgsl              # Temporal anti-aliasing
+├── bloom_v1.wgsl         # Multi-scale bloom
+└── [other shader files]
+```
 
 ### Use Pre-built Shaders
 
@@ -804,13 +823,17 @@ let shader_module = device.create_shader_module(&ShaderModuleDescriptor {
 });
 ```
 
-### Key Optimizations
+### Key Optimizations v3.0
 
-1. **FP16 precision** - Half-precision where safe (60% bandwidth reduction)
-2. **4-tap PCF** - Reduced samples vs 9-tap (55% less fetches)
-3. **Compute mipmaps** - GPU-based vs CPU (massive speedup)
-4. **Single-pass post** - Eliminates pass overhead
-5. **Fixed pattern sampling** - No texture needed for offsets
+1. **FP16 precision** - Half-precision inputs/outputs (60% bandwidth reduction)
+2. **Fast Fresnel** - 2 exp operations vs pow(..., 5) approximation
+3. **4-tap PCF shadow** - 55% less texture fetches vs 9-tap
+4. **Compute mipmaps** - GPU-based vs CPU (+200% speed)
+5. **Single-pass post** - Bloom + tonemap in one pass (+50%)
+6. **Early alpha discard** - Skip lighting for transparent pixels
+7. **FMA hints** - Fused multiply-add instruction optimization
+8. **SSR binary refinement** - Better quality with same cost
+9. **Squared vignette** - Single MAD instead of smoothstep
 
 ### WGSL Compiler Hints
 

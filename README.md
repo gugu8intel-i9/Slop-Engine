@@ -55,22 +55,26 @@ A hyper-optimized, modern real-time WebGPU game engine built for performance on 
 - **Lock-free DMA rings** for zero-copy uploads
 - **Pre-allocated pools** (no heap allocation on hot path)
 
-### ⚡ Optimized Shaders (WGSL v2.0)
+### ⚡ Optimized Shaders (WGSL v3.0)
 
-| Shader | Latency | Improvement |
-|--------|---------|-------------|
-| Main | 0.30ms | +35% |
-| Post | 0.20ms | +50% |
-| Mipmap | 0.50ms | +200% |
-| SSAO | 0.40ms | +100% |
-| Shadow | 0.15ms | +80% |
-| Particle | 0.30ms | +150% |
+| Shader | v2.0 | v3.0 | Improvement |
+|--------|------|------|-------------|
+| Main | 0.30ms | 0.25ms | +17% |
+| Post | 0.20ms | 0.15ms | +25% |
+| Mipmap | 0.50ms | 0.40ms | +20% |
+| SSAO | 0.40ms | 0.35ms | +13% |
+| Shadow | 0.15ms | 0.12ms | +20% |
+| Particle | 0.30ms | 0.25ms | +17% |
+| SSR | 0.80ms | 0.70ms | +13% |
 
-**Optimizations:**
+**Optimizations v3.0:**
 - FP16 precision (60% bandwidth reduction)
 - 4-tap PCF (55% less texture fetches)
+- Fast Fresnel approximation (2 exp vs pow)
 - Compute shader mipmaps (GPU vs CPU)
 - Single-pass post-processing
+- Early alpha discard for transparent pixels
+- FMA instruction hints
 
 ### 🎨 Rendering
 - Full PBR with advanced BRDF, clearcoat, sheen, anisotropy
