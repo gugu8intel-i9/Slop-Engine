@@ -741,7 +741,7 @@ pub struct TDSPEngine {
 
 ## License
 
-MIT License - See LICENSE file
+GNU AGPL (Affero General Public License) License - See LICENSE file
 
 ---
 
