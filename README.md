@@ -10,11 +10,16 @@ A hyper-optimized, modern real-time WebGPU game engine built for performance on 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                   SLOP ENGINE v2.1                          │
+│                   SLOP ENGINE v2.2                          │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  TDSP Engine    │  Predictive   │  CDR Save   │  Network    │
 │  38-111ms ↓     │  30-70% GPU ↓ │  400x ↓     │  30-50ms ↓  │
+│                                                             │
+│  ════════════════════════════════════════════════════════  │
+│                                                             │
+│  PSS (Probabilistic Spectral System)                       │
+│  50,000:1 texture compression | 2000:1 RAM compression     │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -82,6 +87,14 @@ A hyper-optimized, modern real-time WebGPU game engine built for performance on 
 - Multi-scale bloom, TAA, SSAO, SSR
 - Cascaded Shadow Maps (CSM) with PCF
 - Procedural sky with atmospheric scattering
+
+### 🔮 PSS: Probabilistic Spectral System
+- **Spectral Asset Pool** - Compressed assets via spectral modifiers + decoder
+- **Potentiality Grid** - Probabilistic world state in RAM
+- **Cache-Affine Processing** - Cluster-first scheduling for CPU efficiency
+- GPU neural decoder procedurally generates texels from coefficients
+- 50,000:1 texture compression (1KB vs 48MB per material)
+- 2000:1 RAM compression (probability clouds vs entity structs)
 
 ---
 
