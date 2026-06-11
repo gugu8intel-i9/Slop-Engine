@@ -4,9 +4,7 @@
 ![License](https://img.shields.io/badge/license-AGPL--3.0-blue)
 ![Rust](https://img.shields.io/badge/rust-1.70+-orange)
 
-A hyper-optimized, modern real-time WebGPU game engine built for performance on constrained hardware.
-
-**Optimized for:** i5-5200U + RTX 3050 Laptop + 32GB DDR3
+A hyper-optimized, modern real-time WebGPU game engine built for high-performance real-time applications.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -99,15 +97,6 @@ A hyper-optimized, modern real-time WebGPU game engine built for performance on 
 ---
 
 ## 📊 Performance
-
-### Expected FPS on i5-5200U + RTX 3050 Laptop
-
-| Scene | Before | After | Improvement |
-|-------|--------|-------|-------------|
-| Empty scene | 15 FPS | 25 FPS | +67% |
-| Simple geometry | 25 FPS | 40 FPS | +60% |
-| Medium (50 objects) | 15 FPS | 28 FPS | +87% |
-| Heavy scene | 8 FPS | 15 FPS | +88% |
 
 ### Latency Savings
 
@@ -261,7 +250,6 @@ Contributions welcome, especially around:
 
 * If you wish to contribute, please be a sponsor, because these API costs are getting expensive
 * If any issue occurs, please put an issue out
-* Built with ❤️ for constrained hardware
 
 ---
 

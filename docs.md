@@ -2,7 +2,7 @@
 
 **High-Performance WebGPU Game Engine with TDSP (Temporal Decoupling and Semantic Prediction)**
 
-A lightweight, modular Rust game engine optimized for low-latency applications on constrained hardware (i5-5200U + RTX 3050 Laptop).
+A lightweight, modular Rust game engine optimized for low-latency real-time applications.
 
 ---
 
@@ -97,15 +97,6 @@ cargo run --release
 ---
 
 ## Core Concepts
-
-### Hardware Optimization Focus
-
-Designed for constrained hardware:
-- **i5-5200U** (2-core/4-thread 2015 CPU) - Major bottleneck
-- **RTX 3050 Laptop** - Entry-level, thermally constrained
-- **32GB DDR3** - Plenty of RAM (not the bottleneck)
-
-All systems target maximum performance on limited CPU/GPU resources.
 
 ### Key Architectural Decisions
 
@@ -1137,15 +1128,6 @@ cargo build --release
 ---
 
 ## Performance
-
-### Expected Performance on i5-5200U + RTX 3050 Laptop
-
-| Scene | Before | After | Improvement |
-|-------|--------|-------|-------------|
-| Empty scene | 15 FPS | 25 FPS | +67% |
-| Simple geometry (20 objects) | 25 FPS | 40 FPS | +60% |
-| Medium scene (50 objects) | 15 FPS | 28 FPS | +87% |
-| Heavy scene (100+ objects) | 8 FPS | 15 FPS | +88% |
 
 ### Key Optimizations Contributing to Performance
 
