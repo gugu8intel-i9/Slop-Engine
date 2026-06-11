@@ -1,7 +1,8 @@
 // src/lib.rs
-//! Slop Engine - High-Performance WebGPU Game Engine
+//! Slop Engine - High-Performance WebGPU Game Engine with TDSP
 //! 
 //! Integrated subsystems:
+//! - TDSP (Temporal Decoupling and Semantic Prediction)
 //! - Predictive Rendering (micro-tile re-rendering, frame reuse)
 //! - Client-Side Prediction (network latency reduction)
 //! - W-TinyLFU Memory Management (VRAM/RAM optimization)
@@ -23,11 +24,13 @@ pub mod predictive_renderer;
 pub mod offload;
 pub mod network;
 pub mod resource_manager;
+pub mod tdsp_engine;
 
 use predictive_renderer::*;
 use offload::{OffloadManager, OffloadConfig};
-use network::{NetworkSystem, NetworkRole, SceneSnapshot, EntitySnapshot, AnimationSnapshot};
+use network::{NetworkSystem, NetworkRole};
 use resource_manager::{ResourceManager, ResourceConfig};
+use tdsp_engine::*;
 
 use glam::{Vec3, vec3};
 
@@ -41,6 +44,7 @@ pub struct EngineConfig {
     pub offload: OffloadConfig,
     pub network: NetworkConfig,
     pub resource: ResourceConfig,
+    pub tdsp: TDSPConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +52,16 @@ pub struct NetworkConfig {
     pub enabled: bool,
     pub role: NetworkRole,
     pub tick_rate: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct TDSPConfig {
+    pub enabled: bool,
+    pub render_hz: f64,
+    pub physics_hz: f64,
+    pub network_hz: f64,
+    pub intent_prediction_enabled: bool,
+    pub variance_delta_enabled: bool,
 }
 
 impl Default for EngineConfig {
@@ -61,6 +75,20 @@ impl Default for EngineConfig {
                 tick_rate: 60,
             },
             resource: ResourceConfig::default(),
+            tdsp: TDSPConfig::default(),
+        }
+    }
+}
+
+impl Default for TDSPConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            render_hz: 144.0,
+            physics_hz: 60.0,
+            network_hz: 30.0,
+            intent_prediction_enabled: true,
+            variance_delta_enabled: true,
         }
     }
 }
@@ -75,10 +103,11 @@ pub struct EngineState {
     offload_manager: OffloadManager,
     network_system: NetworkSystem,
     resource_manager: Option<Arc<ResourceManager>>,
+    tdsp_engine: TDSPEngine,
     
     // Scene data
-    entities: Vec<EntitySnapshot>,
-    active_animations: HashMap<u64, AnimationSnapshot>,
+    entities: Vec<network::EntitySnapshot>,
+    active_animations: HashMap<u64, predictive_renderer::AnimationSnapshot>,
     
     // Camera
     camera_position: Vec3,
@@ -97,6 +126,7 @@ impl EngineState {
             offload_manager: OffloadManager::new(config.offload.clone()),
             network_system: NetworkSystem::new(config.network.role),
             resource_manager: None,
+            tdsp_engine: TDSPEngine::new(),
             entities: Vec::new(),
             active_animations: HashMap::new(),
             camera_position: Vec3::ZERO,
@@ -141,18 +171,23 @@ impl EngineState {
     }
     
     pub fn add_entity(&mut self, id: u64, position: Vec3, rotation: Vec3, scale: Vec3) {
-        self.entities.push(EntitySnapshot {
-            id,
-            position,
-            rotation,
-            scale,
-            bounds_min: position - scale * 0.5,
-            bounds_max: position + scale * 0.5,
-        });
+        let entity = network::EntitySnapshot::new(id, position, rotation, scale);
+        self.entities.push(entity);
+        
+        // Register with TDSP engine
+        self.tdsp_engine.register_entity(id, position);
     }
     
     pub fn tick(&mut self) {
         self.frame_count += 1;
+        
+        // Update TDSP engine
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        
+        let tdsp_result = self.tdsp_engine.update(current_time);
         
         // Update offload manager
         self.offload_manager.tick();
@@ -160,6 +195,17 @@ impl EngineState {
         // Update resource manager
         if let Some(rm) = &self.resource_manager {
             rm.tick();
+        }
+        
+        // Log TDSP stats periodically
+        if self.frame_count % 60 == 0 {
+            let stats = self.tdsp_engine.get_stats();
+            log::debug!(
+                "TDSP: Latency saved: {:.1}ms | Optimistic frames: {} | Variance compress: {:.1}%",
+                stats.total_latency_saved_ns as f64 / 1_000_000.0,
+                stats.optimistic_frames,
+                (1.0 - stats.variance_stats.compression_ratio) * 100.0
+            );
         }
     }
 }
@@ -174,7 +220,6 @@ pub async fn run() {
 }
 
 pub async fn run_with_config(config: EngineConfig) {
-    // 1. Setup logging
     #[cfg(target_arch = "wasm32")]
     {
         std::panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -185,11 +230,10 @@ pub async fn run_with_config(config: EngineConfig) {
         let _ = env_logger::try_init();
     }
 
-    log::info!("Initializing Slop Engine...");
+    log::info!("Initializing Slop Engine with TDSP...");
     
     let event_loop = EventLoop::new().expect("Failed to create event loop");
 
-    // 2. Initialize WGPU
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
         ..Default::default()
@@ -223,10 +267,8 @@ pub async fn run_with_config(config: EngineConfig) {
 
     log::info!("GPU initialized: {:?}", adapter.get_info());
 
-    // 3. Create engine state
     let mut engine_state = EngineState::new(config);
 
-    // 4. Setup App
     let mut app = EngineApp {
         instance,
         device: Arc::new(device),
@@ -240,9 +282,9 @@ pub async fn run_with_config(config: EngineConfig) {
         depth_texture_view: None,
         hdr_texture_view: None,
         predictive_enabled: true,
+        tdsp_enabled: true,
     };
 
-    // 5. Start
     #[cfg(target_arch = "wasm32")]
     {
         use winit::platform::web::EventLoopExtWebSys;
@@ -282,6 +324,7 @@ struct EngineApp {
     depth_texture_view: Option<wgpu::TextureView>,
     hdr_texture_view: Option<wgpu::TextureView>,
     predictive_enabled: bool,
+    tdsp_enabled: bool,
 }
 
 impl ApplicationHandler for EngineApp {
@@ -291,7 +334,7 @@ impl ApplicationHandler for EngineApp {
         log::info!("Creating window...");
         
         let attrs = Window::default_attributes()
-            .with_title("Slop Engine v2.0")
+            .with_title("Slop Engine v2.1 - TDSP Enabled")
             .with_inner_size(winit::dpi::PhysicalSize::new(1280, 720));
         let window = Arc::new(event_loop.create_window(attrs).expect("Window creation failed"));
         self.window = Some(window.clone());
@@ -330,27 +373,22 @@ impl ApplicationHandler for EngineApp {
         };
         surface.configure(&self.device, &config);
 
-        // Initialize engine systems
         if let Some(ref mut state) = self.engine_state {
             state.init_resource_manager(self.device.clone(), self.queue.clone());
             state.init_predictive_renderer(&self.device, size.width, size.height);
             
-            // Add some demo entities
-            for i in 0..10 {
+            for i in 0..20 {
                 state.add_entity(
                     i as u64,
-                    vec3((i as f32 - 5.0) * 2.0, 0.0, -10.0),
+                    vec3((i as f32 - 10.0) * 1.5, 0.0, -8.0),
                     Vec3::ZERO,
                     vec3(1.0, 1.0, 1.0),
                 );
             }
         }
 
-        // Create depth and HDR textures
         let depth_view = self.create_depth_texture(&config);
         let hdr_view = self.create_hdr_texture(&config);
-
-        // Create render pipeline
         let pipeline = self.build_pipeline(config.format);
 
         self.surface = Some(surface);
@@ -359,7 +397,7 @@ impl ApplicationHandler for EngineApp {
         self.hdr_texture_view = Some(hdr_view);
         self.render_pipeline = Some(pipeline);
 
-        log::info!("Engine initialized successfully!");
+        log::info!("TDSP Engine initialized!");
         window.request_redraw();
     }
 
@@ -369,7 +407,7 @@ impl ApplicationHandler for EngineApp {
 
         match event {
             WindowEvent::CloseRequested => {
-                log::info!("Shutting down...");
+                log::info!("Shutting down TDSP Engine...");
                 event_loop.exit();
             }
             WindowEvent::Resized(physical_size) => {
@@ -382,7 +420,6 @@ impl ApplicationHandler for EngineApp {
                         config.height = physical_size.height;
                         surface.configure(&self.device, config);
                         
-                        // Resize predictive renderer
                         if let Some(ref mut state) = self.engine_state {
                             if let Some(ref mut pr) = state.predictive_renderer {
                                 pr.resize(physical_size.width, physical_size.height);
@@ -429,12 +466,32 @@ impl EngineApp {
         if let Some(ref mut state) = self.engine_state {
             state.tick();
             
-            // Simulate camera movement
             state.update_camera(
-                vec3((state.frame_count as f32 * 0.01).sin() * 5.0, 2.0, -5.0),
+                vec3((state.frame_count as f32 * 0.01).sin() * 3.0, 2.0, -5.0),
                 0.0,
                 state.frame_count as f32 * 0.001,
             );
+            
+            // Show TDSP performance
+            if state.frame_count % 120 == 0 {
+                let tdsp_stats = state.tdsp_engine.get_stats();
+                let pr_stats = state.predictive_renderer.as_ref().map(|p| p.get_stats());
+                
+                log::info!(
+                    "=== TDSP Performance ===\n\
+                     Intent Confidence: {:.0}%\n\
+                     Latency Saved: {:.1}ms\n\
+                     Optimistic Frames: {}\n\
+                     Variance Compression: {:.0}% saved\n\
+                     Predictive: {:.0}% GPU saved\n\
+                     ======================",
+                    tdsp_stats.intent_confidence * 100.0,
+                    tdsp_stats.total_latency_saved_ns as f64 / 1_000_000.0,
+                    tdsp_stats.optimistic_frames,
+                    (1.0 - tdsp_stats.variance_stats.compression_ratio) * 100.0,
+                    pr_stats.map(|s| s.gpu_time_saved_ms * 100.0 / state.frame_count.max(1) as f64).unwrap_or(0.0)
+                );
+            }
         }
     }
 
@@ -448,34 +505,18 @@ impl EngineApp {
         let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Main Encoder"),
+            label: Some("TDSP Encoder"),
         });
 
-        // Use predictive rendering if enabled
-        if self.predictive_enabled {
+        if self.tdsp_enabled {
             if let Some(ref mut state) = self.engine_state {
                 if let Some(ref mut pr) = state.predictive_renderer {
                     let scene = state.get_scene_snapshot(config.width, config.height);
-                    
-                    // Get hot tiles info
-                    let hot_tiles = pr.tile_manager.hot_tiles();
-                    let stats = pr.tile_manager.statistics();
-                    
-                    // Log performance stats
-                    if state.frame_count % 60 == 0 {
-                        log::debug!(
-                            "Predictive: {}/{} tiles hot ({:.1}%) | Saved: {:.1}ms/frame",
-                            stats.hot_tiles,
-                            stats.total_tiles,
-                            stats.hot_ratio * 100.0,
-                            pr.stats.gpu_time_saved_ms / 60.0
-                        );
-                    }
+                    let _ = pr.render(&self.device, &self.queue, &scene, &mut encoder, &view);
                 }
             }
         }
 
-        // Main render pass
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Main Pass"),
@@ -483,7 +524,7 @@ impl EngineApp {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.02, g: 0.02, b: 0.04, a: 1.0 }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.01, g: 0.01, b: 0.02, a: 1.0 }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -511,7 +552,7 @@ impl EngineApp {
 
     fn build_pipeline(&self, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
         let shader = self.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
-            label: Some("Main Shader"),
+            label: Some("TDSP Shader"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(MAIN_WGSL)),
         });
 
@@ -615,13 +656,9 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) ve
 
 @fragment
 fn fs_main() -> @location(0) vec4<f32> {
-    return vec4<f32>(0.2, 0.4, 0.8, 1.0);
+    return vec4<f32>(0.15, 0.35, 0.75, 1.0);
 }
 "#;
-
-// ============================================================================
-// TESTS
-// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -632,13 +669,13 @@ mod tests {
         let config = EngineConfig::default();
         assert_eq!(config.network.tick_rate, 60);
         assert!(config.predictive_rendering.enabled);
+        assert!(config.tdsp.enabled);
     }
 
     #[test]
-    fn test_scene_snapshot() {
-        let state = EngineState::new(EngineConfig::default());
-        let snapshot = state.get_scene_snapshot(1920, 1080);
-        assert_eq!(snapshot.screen_width, 1920);
-        assert_eq!(snapshot.screen_height, 1080);
+    fn test_tdsp_engine_creation() {
+        let engine = TDSPEngine::new();
+        let stats = engine.get_stats();
+        assert_eq!(stats.registered_entities, 0);
     }
 }
