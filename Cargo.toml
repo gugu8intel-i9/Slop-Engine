@@ -15,6 +15,7 @@ high_priority = ["dep:thread-priority"]
 mimalloc = ["dep:mimalloc"]
 tokio_runtime = ["dep:tokio"]
 lru_safe = []
+audio = ["dep:rodio"]
 
 [dependencies]
 # -----------------------------------
@@ -41,7 +42,7 @@ lru = "0.16.3"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 log = "0.4"
 rayon = "1.10"
-smallvec = { version = "1.13", features = ["union", "manually_drop"] }
+smallvec = { version = "1.13", features = ["union"] }
 blake3 = "1.5"
 digest = "0.10"
 
@@ -59,7 +60,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 bincode = "1.3"  # Fast binary serialization for network compression
 thiserror = "1.0"
-rand = "0.8"
+rand = { version = "0.8", features = ["small_rng"] }
 sha2 = "0.10"
 hmac = "0.12"
 aes-gcm = "0.10"
@@ -79,7 +80,7 @@ parking_lot_core = "0.9"  # Explicit dependency for faster parking_lot operation
 # Native-Only Dependencies (Windows/Mac/Linux)
 # ===================================
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-rodio = { version = "0.17", features = ["symphonia-all"] }
+rodio = { version = "0.17", features = ["symphonia-all"], optional = true }
 env_logger = "0.11"
 notify = "6.1"
 pollster = "0.3"
@@ -132,8 +133,6 @@ panic = "abort" # Smaller binary, faster panics (uncomment if no catching panics
 
 [profile.release.build-override]
 opt-level = 3
-lto = true
-codegen-units = 1
 
 # ===================================
 # WASM Optimization
