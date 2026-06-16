@@ -612,13 +612,13 @@ pub struct EventRingBuffer<T, const N: usize> {
     capacity: usize,
 }
 
-impl<T, const N: usize> EventRingBuffer<T, N> {
+impl<T: Default, const N: usize> EventRingBuffer<T, N> {
     pub fn new() -> Self {
         let mut buffer = [std::ptr::null_mut(); N];
         
         // Pre-allocate slots
         for i in 0..N {
-            buffer[i] = Box::into_raw(Box::new(unsafe { std::mem::zeroed() }));
+            buffer[i] = Box::into_raw(Box::new(T::default()));
         }
         
         Self {
