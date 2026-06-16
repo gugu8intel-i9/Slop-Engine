@@ -614,12 +614,7 @@ pub struct EventRingBuffer<T, const N: usize> {
 
 impl<T, const N: usize> EventRingBuffer<T, N> {
     pub fn new() -> Self {
-        let mut buffer = [std::ptr::null_mut(); N];
-        
-        // Pre-allocate slots
-        for i in 0..N {
-            buffer[i] = Box::into_raw(Box::new(unsafe { std::mem::zeroed() }));
-        }
+        let buffer = std::array::from_fn(|_| Mutex::new(None));
         
         Self {
             buffer,
@@ -643,9 +638,7 @@ impl<T, const N: usize> EventRingBuffer<T, N> {
         
         // Write event
         let idx = (head % size) as usize;
-        unsafe {
-            *self.buffer[idx] = event;
-        }
+        *self.buffer[idx].lock() = Some(event);
         
         // Publish
         self.head.store(head + 1, Ordering::Release);
