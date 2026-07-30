@@ -6,6 +6,8 @@
 
 A hyper-optimized, modern real-time WebGPU game engine built for high-performance real-time applications.
 
+> 📖 **Developer Guide**: Check out [USAGE.md](USAGE.md) for a complete tutorial on building games with Slop Engine, using the Unreal Framework, and writing Blueprints.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                   SLOP ENGINE v2.2                          │
@@ -237,6 +239,7 @@ Slop-Engine/
 
 ## 🛠️ Recent Fixes & Updates
 
+- **Developer Usage Guide (`USAGE.md`)**: Added a comprehensive tutorial teaching developers how to use Slop Engine, set up the Unreal Engine Gameplay Framework (`AActor`, `ACharacter`, `UWorld`, `APlayerController`), write Blueprint VM Event Graphs, and integrate WebGPU rendering & TDSP simulation.
 - **Unreal Engine Gameplay Paradigm & Blueprint VM**: Implemented an optional, high-performance Unreal Engine Actor-Component framework (`AActor`, `ACharacter`, `UWorld`, `AGameModeBase`, `APlayerController`) and a zero-allocation Blueprint Bytecode Virtual Machine (`EBlueprintOpcode`, `BlueprintGraph`, `BlueprintVM`) under the `unreal_framework` feature flag.
 - **Build & Compilation Fixes**: Resolved all 43 Rust compiler errors across `src/lib.rs`, `src/predictive_renderer.rs`, `src/offload.rs`, `src/resource_manager.rs`, `src/tdsp_engine.rs`, `src/causal_save.rs`, `src/spectral_pss.rs`, and `src/network.rs`.
 - **wgpu 22.0 API Compatibility**: Updated `ImageDataLayout` (`Option<u32>` fields) and shader module creation descriptors for `wgpu` 22.
@@ -272,6 +275,7 @@ Contributions welcome, especially around:
 
 ## Links
 
+- **Documentation & Usage Guide:** [USAGE.md](USAGE.md)
 - **GitHub:** https://github.com/gugu8intel-i9/Slop-Engine
 - **Issues:** https://github.com/gugu8intel-i9/Slop-Engine/issues
 - **Discussions:** https://github.com/gugu8intel-i9/Slop-Engine/discussions
