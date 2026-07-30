@@ -499,7 +499,7 @@ impl EngineApp {
                     tdsp_stats.total_latency_saved_ns as f64 / 1_000_000.0,
                     tdsp_stats.optimistic_frames,
                     (1.0 - tdsp_stats.variance_stats.compression_ratio) * 100.0,
-                    pr_stats.map(|s| s.gpu_time_saved_ms * 100.0 / state.frame_count.max(1) as f64).unwrap_or(0.0)
+                    pr_stats.map(|s| s.gpu_time_saved_ms as f64 * 100.0 / state.frame_count.max(1) as f64).unwrap_or(0.0)
                 );
             }
         }
@@ -563,7 +563,7 @@ impl EngineApp {
     }
 
     fn build_pipeline(&self, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
-        let shader = self.device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("TDSP Shader"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(MAIN_WGSL)),
         });

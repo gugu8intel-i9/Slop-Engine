@@ -229,6 +229,16 @@ Slop-Engine/
 
 ---
 
+## 🛠️ Recent Fixes & Updates
+
+- **Build & Compilation Fixes**: Resolved all 43 Rust compiler errors across `src/lib.rs`, `src/predictive_renderer.rs`, `src/offload.rs`, `src/resource_manager.rs`, `src/tdsp_engine.rs`, `src/causal_save.rs`, `src/spectral_pss.rs`, and `src/network.rs`.
+- **wgpu 22.0 API Compatibility**: Updated `ImageDataLayout` (`Option<u32>` fields) and shader module creation descriptors for `wgpu` 22.
+- **Thread Safety & Borrowing**: Fixed borrow checker conflicts in prediction reconciliation (`network.rs`), `TileManager` error marking (`predictive_renderer.rs`), and material bind group retrieval (`resource_manager.rs`).
+- **Resource Management**: Wrapped GPU `TextureView` and `Sampler` references in `Arc` for safe concurrent texture pool handle cloning.
+- **Repository Structure Cleanup**: Removed redundant root `.rs` duplicate files, standardizing source code inside `src/`.
+
+---
+
 ## 📜 License
 
 **GNU AGPL v3** - See [LICENSE](LICENSE) file for details.

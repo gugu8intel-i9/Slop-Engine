@@ -41,8 +41,9 @@ pub struct InputEvent {
     pub acceleration: Vec2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum InputState {
+    #[default]
     Pressed,
     Held,
     Released,
@@ -252,10 +253,10 @@ impl IntentPredictor {
         let predicted_position = self.predicted_intent.predicted_position + predicted_velocity * 0.016;
         
         // Predict likely inputs
-        let predicted_inputs = self.predict_inputs(history);
+        let predicted_inputs = self.predict_inputs(&history);
         
         // Calculate confidence based on pattern consistency
-        let confidence = self.calculate_confidence(history);
+        let confidence = self.calculate_confidence(&history);
         
         self.predicted_intent = PredictedIntent {
             frame: self.predicted_intent.frame + 1,
@@ -269,7 +270,7 @@ impl IntentPredictor {
         self.confidence = confidence;
     }
     
-    fn predict_inputs(&self, history: &[InputEvent]) -> Vec<u32> {
+    fn predict_inputs(&mut self, history: &[InputEvent]) -> Vec<u32> {
         // Simple prediction: if key was pressed recently, predict it again
         let mut predictions = Vec::new();
         
@@ -545,7 +546,7 @@ impl VarianceDeltaCodec {
             compression_ratio: {
                 let sent = self.bytes_sent.load(Ordering::Relaxed) as f32;
                 let saved = self.bytes_saved.load(Ordering::Relaxed) as f32;
-                if sent > 0 { (sent - saved) / sent } else { 1.0 }
+                if sent > 0.0 { (sent - saved) / sent } else { 1.0 }
             },
             entity_count: self.state_distributions.len(),
         }
@@ -605,7 +606,7 @@ impl ClockDomain {
 
 /// Lock-free ring buffer for event sourcing
 pub struct EventRingBuffer<T, const N: usize> {
-    buffer: [*mut T; N],
+    buffer: [Mutex<Option<T>>; N],
     head: AtomicU64,
     tail: AtomicU64,
     count: AtomicU32,
@@ -659,13 +660,13 @@ impl<T, const N: usize> EventRingBuffer<T, N> {
         
         // Read event
         let idx = (tail % self.capacity as u64) as usize;
-        let event = unsafe { std::ptr::read(self.buffer[idx]) };
+        let event = self.buffer[idx].lock().take();
         
         // Publish
         self.tail.store(tail + 1, Ordering::Release);
         self.count.fetch_sub(1, Ordering::Relaxed);
         
-        Some(event)
+        event
     }
     
     pub fn len(&self) -> usize {

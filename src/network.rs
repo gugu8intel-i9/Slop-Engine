@@ -424,35 +424,45 @@ impl NetworkSystem {
     }
 
     pub fn reconcile(&mut self, player_id: u64, server_frame: u32, server_position: [f32; 3]) {
-        let mut pending = self.pending_inputs.write();
-        let mut predicted = self.predicted_states.write();
-        
-        for pending_input in pending.iter_mut() {
-            if pending_input.input.frame <= server_frame {
-                pending_input.acknowledged = true;
+        {
+            let mut pending = self.pending_inputs.write();
+            for pending_input in pending.iter_mut() {
+                if pending_input.input.frame <= server_frame {
+                    pending_input.acknowledged = true;
+                }
             }
         }
         
-        if let Some(current) = predicted.get(&player_id) {
-            let tolerance = 0.01;
-            let diff = f32::sqrt(
-                (server_position[0] - current.position[0]).powi(2) +
-                (server_position[1] - current.position[1]).powi(2) +
-                (server_position[2] - current.position[2]).powi(2)
-            );
-            
-            if diff > tolerance {
-                log::warn!("Prediction divergence: {} > {}", diff, tolerance);
-                predicted.insert(player_id, PredictedState {
-                    frame: server_frame,
-                    position: server_position,
-                    velocity: current.velocity,
-                    rotation: current.rotation,
-                    input_sequence: server_frame,
-                });
+        let needs_resim = {
+            let mut predicted = self.predicted_states.write();
+            if let Some(current) = predicted.get(&player_id).cloned() {
+                let tolerance = 0.01;
+                let diff = f32::sqrt(
+                    (server_position[0] - current.position[0]).powi(2) +
+                    (server_position[1] - current.position[1]).powi(2) +
+                    (server_position[2] - current.position[2]).powi(2)
+                );
                 
-                self.resimulate_from_frame(player_id, server_frame + 1);
+                if diff > tolerance {
+                    log::warn!("Prediction divergence: {} > {}", diff, tolerance);
+                    predicted.insert(player_id, PredictedState {
+                        frame: server_frame,
+                        position: server_position,
+                        velocity: current.velocity,
+                        rotation: current.rotation,
+                        input_sequence: server_frame,
+                    });
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
             }
+        };
+
+        if needs_resim {
+            self.resimulate_from_frame(player_id, server_frame + 1);
         }
     }
 
@@ -469,16 +479,17 @@ impl NetworkSystem {
             .map(|p| p.position)
             .unwrap_or([0.0; 3]);
         
+        let unacked_len = unacked.len() as u32;
         for input in unacked {
             current_pos[0] += 0.016 * input.inputs.first().map(|&b| b as f32 * 0.1).unwrap_or(0.0);
         }
         
         predicted.insert(player_id, PredictedState {
-            frame: from_frame + unacked.len() as u32,
+            frame: from_frame + unacked_len,
             position: current_pos,
             velocity: [0.0; 3],
             rotation: [0.0_f32; 4],
-            input_sequence: from_frame + unacked.len() as u32,
+            input_sequence: from_frame + unacked_len,
         });
     }
 

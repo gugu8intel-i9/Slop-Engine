@@ -90,7 +90,7 @@ pub struct BaseAsset {
     pub spectral_channels: usize,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct SpectralStats {
     pub assets_materialized: u64,
     pub coeff_bytes_streamed: usize,
@@ -181,7 +181,7 @@ impl SpectralAssetPool {
     }
     
     pub fn get_stats(&self) -> SpectralStats {
-        self.stats.read().clone()
+        (*self.stats.read()).clone()
     }
 }
 
@@ -353,7 +353,7 @@ pub struct RetroEvent {
     pub probability_seed: u64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct GridStats {
     pub cells_collapsed: u64,
     pub cells_in_potential: u64,
@@ -418,7 +418,7 @@ impl PotentialityGrid {
         // Collapse potentiality for newly visible cells
         for cell_id in &visible {
             if !self.frustum_culled.read().contains(&cell_id) {
-                self.collapse_cell(cell_id);
+                self.collapse_cell(*cell_id);
             }
         }
         
@@ -468,7 +468,7 @@ impl PotentialityGrid {
         let mut stats = self.stats.write();
         
         // Sample from probability distribution
-        let entity_count = self.root.probability_dist.entity_count.sample(&mut rng);
+        let entity_count = self.root.probability_dist.entity_count.sample(&mut *rng);
         let state = self.root.probability_dist.states.iter()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
             .map(|(k, _)| k.clone());
@@ -509,7 +509,7 @@ impl PotentialityGrid {
         
         // Use cell seed for deterministic generation
         let seed = cell_id.wrapping_mul(0x9e3779b97f4a7c15);
-        let mut deterministic_rng = SmallRng::from_seed(seed);
+        let mut deterministic_rng = SmallRng::seed_from_u64(seed);
         
         Some(CollapsedEntity {
             position: Vec3::new(
@@ -525,7 +525,7 @@ impl PotentialityGrid {
     }
     
     pub fn get_stats(&self) -> GridStats {
-        self.stats.read().clone()
+        (*self.stats.read()).clone()
     }
 }
 
@@ -543,6 +543,7 @@ pub struct CollapsedEntity {
 // ============================================================================
 
 /// A data cluster optimized for CPU cache
+#[derive(Debug, Clone)]
 pub struct DataCluster {
     pub id: u64,
     pub bounds: [[f32; 3]; 2],

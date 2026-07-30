@@ -621,13 +621,18 @@ impl DivergenceDetector {
         }
     }
     
-    fn find_causal_root<'a>(&self, predicted: &'a PredictedState, actual: &'a ActualState) -> CausalRoot<'a> {
+    fn find_causal_root(&self, predicted: &PredictedState, actual: &ActualState) -> CausalRoot {
         // Simple heuristic: find the smallest difference
         // In real implementation, this would trace back through simulation
         
         // Check if it's a physics impulse
         if Self::vector_length(&actual.velocity) > Self::vector_length(&predicted.velocity) * 2.0 {
-            return CausalRoot::Physics(0, Self::vector_diff(&actual.velocity, &predicted.velocity));
+            let diff = [
+                actual.velocity[0] - predicted.velocity[0],
+                actual.velocity[1] - predicted.velocity[1],
+                actual.velocity[2] - predicted.velocity[2],
+            ];
+            return CausalRoot::Physics(0, diff);
         }
         
         // Default to player input
@@ -659,7 +664,7 @@ impl DivergenceDetector {
 }
 
 #[derive(Debug)]
-enum CausalRoot<'a> {
+enum CausalRoot {
     PlayerInput(InputType, Vec<u8>),
     Physics(u64, [f32; 3]),
     Script(u64, Vec<u8>),

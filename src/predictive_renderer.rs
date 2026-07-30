@@ -232,7 +232,7 @@ impl DeltaPredictor {
             view_proj_change: self.estimate_view_proj_change(scene),
         };
         
-        delta.camera_motion = motion;
+        delta.camera_motion = motion.clone();
         
         // Store in history
         if self.camera_history.len() >= 4 {
@@ -517,13 +517,15 @@ impl TileManager {
     }
     
     pub fn mark_error(&mut self, coord: TileCoord, error: f32) {
+        let max_acc = self.config.max_accumulated_error;
+        let thresh = self.config.error_threshold;
         if let Some(tile) = self.get_tile_mut(coord) {
             tile.error_score = error;
             tile.accumulated_error += error;
             
-            if tile.accumulated_error > self.config.max_accumulated_error {
+            if tile.accumulated_error > max_acc {
                 tile.state = TileState::ForceRefresh;
-            } else if error > self.config.error_threshold {
+            } else if error > thresh {
                 tile.state = TileState::Error;
             }
         }
@@ -584,7 +586,7 @@ pub struct ReprojectionEngine {
 
 impl ReprojectionEngine {
     pub fn new(device: &Device) -> Self {
-        let shader = device.create_shader_module(&ShaderModuleDescriptor {
+        let shader = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("predictive_reproject"),
             source: ShaderSource::Wgsl(Cow::Borrowed(REPROJECT_WGSL)),
         });
@@ -702,7 +704,7 @@ pub struct PredictiveRenderer {
     stats: PredictiveStats,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PredictiveStats {
     pub frames_rendered: u64,
     pub tiles_reduced: u64,
@@ -715,10 +717,11 @@ pub struct PredictiveStats {
 impl PredictiveRenderer {
     pub fn new(device: &Device, config: PredictiveRenderConfig, screen_width: u32, screen_height: u32) -> Self {
         Self {
+            config: config.clone(),
             delta_predictor: DeltaPredictor::new(config.clone()),
             tile_manager: TileManager::new(config.clone(), screen_width, screen_height),
             reprojection_engine: ReprojectionEngine::new(device),
-            error_watchdog: ErrorWatchdog::new(config.clone()),
+            error_watchdog: ErrorWatchdog::new(config),
             stats: PredictiveStats::default(),
         }
     }

@@ -23,6 +23,7 @@ use anyhow::Result;
 use smallvec::SmallVec;
 
 // ---------- Config ----------
+#[derive(Debug, Clone)]
 pub struct ResourceConfig {
     pub max_texture_bytes: u64,
     pub staging_buffer_size: u64,
@@ -177,8 +178,8 @@ pub struct ResourceManager {
     material_gens: RwLock<Vec<u8>>,
 
     // GPU resources stored separately for cache efficiency
-    texture_views: RwLock<Vec<Option<wgpu::TextureView>>>,
-    texture_samplers: RwLock<Vec<Option<wgpu::Sampler>>>,
+    texture_views: RwLock<Vec<Option<Arc<wgpu::TextureView>>>>,
+    texture_samplers: RwLock<Vec<Option<Arc<wgpu::Sampler>>>>,
     
     mesh_vertex_buffers: RwLock<Vec<Option<wgpu::Buffer>>>,
     mesh_index_buffers: RwLock<Vec<Option<wgpu::Buffer>>>,
@@ -328,7 +329,7 @@ impl ResourceManager {
 
     /// Get texture view and sampler for rendering. Updates LRU.
     #[inline(always)]
-    pub fn get_texture_view_sampler(&self, h: Handle) -> Option<(wgpu::TextureView, wgpu::Sampler)> {
+    pub fn get_texture_view_sampler(&self, h: Handle) -> Option<(Arc<wgpu::TextureView>, Arc<wgpu::Sampler>)> {
         if !h.is_valid() { return None; }
         
         let idx = h.index();
@@ -341,13 +342,15 @@ impl ResourceManager {
         let view = views[idx].as_ref()?;
         let sampler = samplers[idx].as_ref()?;
         
+        let result = (Arc::clone(view), Arc::clone(sampler));
+        
         drop(views);
         drop(samplers);
         
         // Update LRU
         self.texture_lru.lock().put(idx, ());
         
-        Some((view.as_ref().cloned().unwrap(), sampler.as_ref().cloned().unwrap()))
+        Some(result)
     }
 
     /// Load mesh synchronously: creates GPU buffers immediately.
@@ -487,9 +490,6 @@ impl ResourceManager {
             .and_then(|h| self.get_texture_view_sampler(h))
             .unwrap_or_else(|| self.get_texture_view_sampler(self.dummy_texture).expect("dummy present"));
 
-        drop(mat_buffers);
-        drop(mat_textures);
-
         // Create bind group
         let entries = &[
             wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
@@ -607,7 +607,7 @@ impl ResourceManager {
         self.queue.write_texture(
             wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             &rgba,
-            wgpu::ImageDataLayout { offset: 0, bytes_per_row: std::num::NonZeroU32::new(4 * w), rows_per_image: std::num::NonZeroU32::new(h) },
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(4 * w), rows_per_image: Some(h) },
             size,
         );
 
@@ -631,8 +631,8 @@ impl ResourceManager {
             }
         }
         
-        self.texture_views.write()[handle_index] = Some(view);
-        self.texture_samplers.write()[handle_index] = Some(sampler);
+        self.texture_views.write()[handle_index] = Some(Arc::new(view));
+        self.texture_samplers.write()[handle_index] = Some(Arc::new(sampler));
         
         self.texture_lru.lock().put(handle_index, ());
         *self.current_texture_bytes.lock() += rgba.len() as u64;
@@ -656,7 +656,7 @@ impl ResourceManager {
         queue.write_texture(
             wgpu::ImageCopyTexture { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             &rgba,
-            wgpu::ImageDataLayout { offset: 0, bytes_per_row: std::num::NonZeroU32::new(4), rows_per_image: std::num::NonZeroU32::new(1) },
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
             size,
         );
         let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
@@ -673,7 +673,7 @@ impl ResourceManager {
             texture_count: self.texture_views.read().iter().filter(|v| v.is_some()).count(),
             mesh_count: self.mesh_vertex_buffers.read().iter().filter(|v| v.is_some()).count(),
             material_count: self.material_buffers.read().iter().filter(|v| v.is_some()).count(),
-            bind_group_cache_size: self.bind_group_cache.lock().len(),
+            bind_group_cache_size: 0,
         }
     }
 }

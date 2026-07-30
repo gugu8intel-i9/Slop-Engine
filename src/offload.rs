@@ -273,20 +273,17 @@ impl ResourceMetaPool {
     }
     
     pub fn alloc(&self, meta: ResourceMeta) -> Option<ResourceId> {
+        let id = meta.id;
         let mut free = self.free_list.lock();
         if let Some(idx) = free.pop() {
             let mut slots = self.slots.lock();
             slots[idx] = Some(meta);
-            Some(ResourceId(meta.id.0, meta.id.1))
+            Some(id)
         } else {
             // Grow pool
             let mut slots = self.slots.lock();
-            let idx = slots.len();
             slots.push(Some(meta));
-            drop(slots);
-            let mut free = self.free_list.lock();
-            // Don't add to free list since it's now used
-            Some(ResourceId(meta.id.0, meta.id.1))
+            Some(id)
         }
     }
     
@@ -549,7 +546,7 @@ impl Clone for ResourceMeta {
         Self {
             id: self.id,
             state: AtomicResourceState {
-                data: AtomicU64::new(self.data.load(Ordering::Relaxed)),
+                data: AtomicU64::new(self.state.data.load(Ordering::Relaxed)),
             },
             size: self.size,
             last_access: AtomicU64::new(self.last_access.load(Ordering::Relaxed)),
@@ -573,7 +570,10 @@ impl ResourceMeta {
     
     #[inline(always)]
     fn touch(&self) {
-        self.last_access.store(unsafe { std::mem::transmute::<_, u64>(std::time::Instant::now()) }, Ordering::Relaxed);
+        self.last_access.store(
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+            Ordering::Relaxed
+        );
         self.access_count.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -678,7 +678,7 @@ pub struct OffloadManager {
     frame_counter: AtomicU64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct OffloadStats {
     pub vram_allocations: usize,
     pub vram_evictions: usize,
