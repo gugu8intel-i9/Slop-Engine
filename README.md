@@ -60,11 +60,12 @@ A hyper-optimized, modern real-time WebGPU game engine built for high-performanc
 - **Lock-free DMA rings** for zero-copy uploads
 - **Pre-allocated pools** (no heap allocation on hot path)
 
-### 🎮 Optional Unreal Engine Framework & Blueprint VM (`unreal_framework`)
-- **Actor-Component Architecture**: Native `AActor`, `UActorComponent`, `USceneComponent`, `UStaticMeshComponent`, `UCameraComponent`, and `USpringArmComponent` transforms.
-- **Gameplay Lifecycle**: Complete `UWorld`, `AGameModeBase`, `ACharacter` (with capsule movement, jump physics, and floor detection), `APlayerController`, and `FHitResult` raycasting (`LineTraceSingleByChannel`).
-- **Blueprint Visual Scripting Bytecode VM**: Zero-allocation visual scripting VM with event graphs (`EventBeginPlay`, `EventTick`), flow control (`Branch`, `Goto`), pure math nodes (`VectorAdd`, `FloatLerp`), and actor control functions (`AddActorLocalOffset`, `SpawnActor`).
-- **Command-Buffered Execution**: Deferred spawn/destroy command buffers ensuring zero borrow checker overhead and SIMD-aligned batch evaluation for thousands of Actors per frame.
+### 🖥️ High-Performance Cross-Platform GUI Editor (`slop_editor`)
+- **Multi-OS & Web Assembly Support**: Runs natively on Linux, Windows, macOS, and WebAssembly browsers via WebGPU.
+- **Play-In-Editor (PIE)**: Real-time Play, Pause, Step, and Stop simulation controls for immediate game testing.
+- **World Outliner & Inspector**: Full Scene Tree hierarchy, Actor spawning, Transform Gizmo editing, and Component property inspection.
+- **Visual Scripting Node Canvas**: Interactive Blueprint Graph editor for attaching and wiring event nodes (`EventBeginPlay`, `EventTick`, `AddActorLocalOffset`, `Branch`).
+- **Real-Time Performance Stats**: Integrated FPS counter, frame time breakdown, active draw calls, and VRAM memory telemetry.
 
 ### ⚡ Optimized Shaders (WGSL v3.0)
 
@@ -239,6 +240,7 @@ Slop-Engine/
 
 ## 🛠️ Recent Fixes & Updates
 
+- **High-Performance Cross-Platform GUI Editor (`slop_editor`)**: Added a full-featured GUI Editor (`src/editor.rs` & `src/bin/slop_editor.rs`) compatible with Linux, Windows, macOS, and WebAssembly, featuring Play-In-Editor (PIE), World Outliner, Details Inspector, Blueprint Visual Scripting Node Canvas, and JSON Project Saving.
 - **Developer Usage Guide (`USAGE.md`)**: Added a comprehensive tutorial teaching developers how to use Slop Engine, set up the Unreal Engine Gameplay Framework (`AActor`, `ACharacter`, `UWorld`, `APlayerController`), write Blueprint VM Event Graphs, and integrate WebGPU rendering & TDSP simulation.
 - **Unreal Engine Gameplay Paradigm & Blueprint VM**: Implemented an optional, high-performance Unreal Engine Actor-Component framework (`AActor`, `ACharacter`, `UWorld`, `AGameModeBase`, `APlayerController`) and a zero-allocation Blueprint Bytecode Virtual Machine (`EBlueprintOpcode`, `BlueprintGraph`, `BlueprintVM`) under the `unreal_framework` feature flag.
 - **Build & Compilation Fixes**: Resolved all 43 Rust compiler errors across `src/lib.rs`, `src/predictive_renderer.rs`, `src/offload.rs`, `src/resource_manager.rs`, `src/tdsp_engine.rs`, `src/causal_save.rs`, `src/spectral_pss.rs`, and `src/network.rs`.

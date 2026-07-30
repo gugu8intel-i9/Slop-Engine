@@ -7,22 +7,23 @@ Welcome to **Slop Engine**, a hyper-optimized, modern real-time WebGPU game engi
 ## 📋 Table of Contents
 
 1. [Installation & Cargo Setup](#1-installation--cargo-setup)
-2. [Quick Start Engine Loop](#2-quick-start-engine-loop)
-3. [Unreal Engine Framework (`unreal_framework`)](#3-unreal-engine-framework-unreal_framework)
+2. [Launching the GUI Editor (`slop_editor`)](#2-launching-the-gui-editor-slop_editor)
+3. [Quick Start Engine Loop](#3-quick-start-engine-loop)
+4. [Unreal Engine Framework (`unreal_framework`)](#4-unreal-engine-framework-unreal_framework)
    - [World & GameMode Setup](#world--gamemode-setup)
    - [Spawning & Controlling Characters](#spawning--controlling-characters)
    - [Creating Actors & Components](#creating-actors--components)
    - [Raycasting & Line Tracing](#raycasting--line-tracing)
-4. [Blueprint Visual Scripting System](#4-blueprint-visual-scripting-system)
+5. [Blueprint Visual Scripting System](#5-blueprint-visual-scripting-system)
    - [Understanding Blueprint Graphs](#understanding-blueprint-graphs)
    - [Creating & Attaching a Blueprint Graph](#creating--attaching-a-blueprint-graph)
-5. [Core Systems Guide](#5-core-systems-guide)
+6. [Core Systems Guide](#6-core-systems-guide)
    - [TDSP Engine (Intent Prediction)](#tdsp-engine-intent-prediction)
    - [Predictive Rendering](#predictive-rendering)
    - [CDR Save System (Causal Divergence Recording)](#cdr-save-system-causal-divergence-recording)
    - [Network System](#network-system)
    - [Resource & Memory Management](#resource--memory-management)
-6. [Building for Web (WASM) & Native](#6-building-for-web-wasm--native)
+7. [Building for Web (WASM) & Native](#7-building-for-web-wasm--native)
 
 ---
 
@@ -43,7 +44,25 @@ To enable the optional Unreal Engine Actor & Blueprint framework, ensure the `un
 
 ---
 
-## 2. Quick Start Engine Loop
+## 2. Launching the GUI Editor (`slop_editor`)
+
+Slop Engine includes a standalone cross-platform GUI Editor application (`slop_editor`) compatible with **Linux**, **Windows**, **macOS**, and **WebAssembly**.
+
+### Running the Editor Application
+```bash
+cargo run --bin slop_editor
+```
+
+### Editor Capabilities
+- **Play-In-Editor (PIE)**: Instantly test game mechanics with Play, Pause, and Step controls.
+- **World Outliner**: Inspect, spawn, and delete Actors in real time.
+- **Details Inspector**: Modify spatial transforms (Location, Rotation, Scale) and component properties.
+- **Blueprint Node Canvas**: Graphically attach and wire zero-allocation Blueprint Event Graphs (`EventBeginPlay`, `EventTick`, `AddActorLocalOffset`).
+- **Project Export**: Save complete Levels to JSON/Binary asset files.
+
+---
+
+## 3. Quick Start Engine Loop
 
 Here is a minimal native application initializing `Slop Engine`:
 
