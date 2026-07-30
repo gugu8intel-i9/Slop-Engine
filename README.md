@@ -58,6 +58,12 @@ A hyper-optimized, modern real-time WebGPU game engine built for high-performanc
 - **Lock-free DMA rings** for zero-copy uploads
 - **Pre-allocated pools** (no heap allocation on hot path)
 
+### 🎮 Optional Unreal Engine Framework & Blueprint VM (`unreal_framework`)
+- **Actor-Component Architecture**: Native `AActor`, `UActorComponent`, `USceneComponent`, `UStaticMeshComponent`, `UCameraComponent`, and `USpringArmComponent` transforms.
+- **Gameplay Lifecycle**: Complete `UWorld`, `AGameModeBase`, `ACharacter` (with capsule movement, jump physics, and floor detection), `APlayerController`, and `FHitResult` raycasting (`LineTraceSingleByChannel`).
+- **Blueprint Visual Scripting Bytecode VM**: Zero-allocation visual scripting VM with event graphs (`EventBeginPlay`, `EventTick`), flow control (`Branch`, `Goto`), pure math nodes (`VectorAdd`, `FloatLerp`), and actor control functions (`AddActorLocalOffset`, `SpawnActor`).
+- **Command-Buffered Execution**: Deferred spawn/destroy command buffers ensuring zero borrow checker overhead and SIMD-aligned batch evaluation for thousands of Actors per frame.
+
 ### ⚡ Optimized Shaders (WGSL v3.0)
 
 | Shader | v2.0 | v3.0 | Improvement |
@@ -231,6 +237,7 @@ Slop-Engine/
 
 ## 🛠️ Recent Fixes & Updates
 
+- **Unreal Engine Gameplay Paradigm & Blueprint VM**: Implemented an optional, high-performance Unreal Engine Actor-Component framework (`AActor`, `ACharacter`, `UWorld`, `AGameModeBase`, `APlayerController`) and a zero-allocation Blueprint Bytecode Virtual Machine (`EBlueprintOpcode`, `BlueprintGraph`, `BlueprintVM`) under the `unreal_framework` feature flag.
 - **Build & Compilation Fixes**: Resolved all 43 Rust compiler errors across `src/lib.rs`, `src/predictive_renderer.rs`, `src/offload.rs`, `src/resource_manager.rs`, `src/tdsp_engine.rs`, `src/causal_save.rs`, `src/spectral_pss.rs`, and `src/network.rs`.
 - **wgpu 22.0 API Compatibility**: Updated `ImageDataLayout` (`Option<u32>` fields) and shader module creation descriptors for `wgpu` 22.
 - **Thread Safety & Borrowing**: Fixed borrow checker conflicts in prediction reconciliation (`network.rs`), `TileManager` error marking (`predictive_renderer.rs`), and material bind group retrieval (`resource_manager.rs`).

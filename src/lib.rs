@@ -27,6 +27,7 @@ pub mod resource_manager;
 pub mod tdsp_engine;
 pub mod causal_save;
 pub mod spectral_pss;
+pub mod unreal_framework;
 
 use predictive_renderer::*;
 use offload::{OffloadManager, OffloadConfig};

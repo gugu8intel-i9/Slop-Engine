@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"] # cdylib for WASM, rlib for Native
 
 [features]
 default = []
+unreal_framework = []
 # High-performance features (Native only)
 high_priority = ["dep:thread-priority"]
 mimalloc = ["dep:mimalloc"]
@@ -23,7 +24,7 @@ audio = ["dep:rodio"]
 # -----------------------------------
 wgpu = "22.0"
 winit = "0.30"
-glam = { version = "0.24", features = ["bytemuck"] }
+glam = { version = "0.24", features = ["bytemuck", "serde"] }
 bytemuck = { version = "1.16", features = ["derive"] }
 
 # -----------------------------------
